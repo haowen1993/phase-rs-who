@@ -11,7 +11,7 @@ use nom::Parser;
 use super::super::oracle_nom::bridge::{nom_on_lower, nom_parse_lower};
 use super::super::oracle_nom::condition as nom_condition;
 use super::super::oracle_nom::condition::{
-    inject_controller_you, parse_cast_using_teamwork_phrase,
+    inject_controller_you, parse_cast_using_teamwork_phrase, parse_havent,
     parse_scoped_player_opponent_and_has_condition, parse_spell_target_superlative_suffix,
     parse_you_put_onto_battlefield_this_way_clause, parse_zone_changed_this_way_clause,
     DamagedThisWayRecipient,
@@ -9011,13 +9011,39 @@ fn parse_activation_count_clause(
     Ok((rest, (AbilityUseTally::Activated, comparator, n)))
 }
 
-/// CR 608.2c: the two printed templates for
+/// CR 608.2c: "you haven't added mana with this ability this turn" (Carpet of
+/// Flowers).
+///
+/// The NEGATIVE reading of the resolution tally — zero resolutions — rather
+/// than a mana-specific ledger. `GameEvent::ManaAdded` carries only `source_id`
+/// and no `ability_index`, so mana cannot be attributed to a printed ability at
+/// all; the tally is the only slot that can answer "this ability, this turn".
+/// The precision gap is empty on the card that prints this: the ability requires
+/// a target opponent (CR 601.2c) and adds X mana where X is that opponent's
+/// Island count, so a resolution that occurs always adds mana.
+///
+/// `LT 1` rather than `EQ 0` because `n` is a `u32` on the variant and zero is
+/// not in the comparison vocabulary the siblings use.
+fn parse_haven_added_mana_clause(
+    input: &str,
+) -> OracleResult<'_, (AbilityUseTally, Comparator, u32)> {
+    let (rest, _) = tag("you ").parse(input)?;
+    let (rest, _) = parse_havent(rest)?;
+    let (rest, _) = tag(" added mana with this ability this turn").parse(rest)?;
+    Ok((rest, (AbilityUseTally::Resolved, Comparator::LT, 1)))
+}
+
+/// CR 608.2c: the three printed templates for
 /// [`AbilityCondition::AbilityUseCountThisTurn`] — how many times THIS ability
 /// has resolved, or been activated, so far this turn.
 fn parse_ability_use_count_condition(lower: &str) -> Option<(AbilityUseTally, Comparator, u32)> {
-    let (rest, parsed) = alt((parse_nth_resolution_clause, parse_activation_count_clause))
-        .parse(lower)
-        .ok()?;
+    let (rest, parsed) = alt((
+        parse_nth_resolution_clause,
+        parse_activation_count_clause,
+        parse_haven_added_mana_clause,
+    ))
+    .parse(lower)
+    .ok()?;
     // Both templates are whole-clause conditions; a leftover tail means the
     // fragment was something else that merely shares a prefix.
     if rest.trim_end_matches('.').trim().is_empty() {

@@ -53385,6 +53385,51 @@ fn veil_of_summer_effect_chain_parses_supported_clauses() {
     )));
 }
 
+// CR 608.2c: Carpet of Flowers — "if you haven't added mana with this ability
+// this turn" is the NEGATIVE reading of the same per-ability resolution tally:
+// the ability has resolved zero times this turn.
+//
+// The tally is the right slot rather than a new "produced mana" ledger:
+// `GameEvent::ManaAdded` carries only `source_id` and no `ability_index`, so
+// mana cannot be attributed to a printed ability at all. The precision gap is
+// also empty for this card — the ability requires a target opponent (CR 601.2c)
+// and produces X mana where X is that opponent's Island count, so a resolution
+// that happens always adds mana.
+
+#[test]
+fn haven_added_mana_with_this_ability_this_turn() {
+    let result = try_nom_condition_as_ability_condition(
+        "you haven't added mana with this ability this turn",
+        &mut ParseContext::default(),
+    );
+    assert_eq!(
+        result,
+        Some(AbilityCondition::AbilityUseCountThisTurn {
+            tally: AbilityUseTally::Resolved,
+            comparator: Comparator::LT,
+            n: 1,
+        })
+    );
+}
+
+#[test]
+fn haven_added_mana_accepts_the_typographic_apostrophe() {
+    // The parser's `parse_havent` accepts U+2019; the condition reading must
+    // survive the same normalization as every other "haven't" clause.
+    let result = try_nom_condition_as_ability_condition(
+        "you haven\u{2019}t added mana with this ability this turn",
+        &mut ParseContext::default(),
+    );
+    assert_eq!(
+        result,
+        Some(AbilityCondition::AbilityUseCountThisTurn {
+            tally: AbilityUseTally::Resolved,
+            comparator: Comparator::LT,
+            n: 1,
+        })
+    );
+}
+
 // CR 603.4: Parser arms for `AbilityCondition::AbilityUseCountThisTurn`.
 // Covers Omnath / Ashling / Nissa / Sephiroth / Teething Wurmlet class.
 

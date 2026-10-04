@@ -6,12 +6,16 @@
 
 ```
 patches/zhs-card-art/
-  README.md                                          ← 本文件
-  0001-feat-art-support-Simplified-Chinese-card-art.patch   ← 补丁本体
+  README.md                                                       ← 本文件
+  0001-feat-art-support-Simplified-Chinese-card-art.patch          ← 功能本体
+  0002-test-art-guard-the-mapped-locales-full-size-vocabula.patch  ← 非回归防护测试
 ```
 
 补丁内容也保存在一个分支上：`patches/zhs-card-art`（基于 `main` 的 `59b2b17`）。
 **分支和补丁文件是同一件事的两种形态**，用哪个都行。
+
+补丁**只含代码，不含本目录**——否则补丁会包含自己，套用时层层嵌套（早期版本确实
+踩过这个坑：补丁体积从 68KB 涨到 78KB）。本目录由分支上一个独立提交维护，不进补丁。
 
 ## 怎么用
 

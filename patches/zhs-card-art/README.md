@@ -6,12 +6,13 @@
 
 ```
 patches/zhs-card-art/
-  0001-feat-art-support-Simplified-Chinese-card-art.patch        ← 功能本体（派生 URL + 卡图语言偏好）
+  0001-feat-art-support-Simplified-Chinese-card-art.patch         ← 功能本体（派生 URL + 卡图语言偏好）
   0002-test-art-guard-the-mapped-locales-full-size-vocabula.patch ← 非回归防护测试（既有六语言不受影响）
   0003-fix-art-attach-the-derived-locale-s-English-rung-at-.patch ← 降级轮挂载位置的修复（见下）
   0004-fix-art-preserve-the-derived-rung-s-size-instead-of-.patch ← 降级轮尺寸传递的修复（见下）
   0005-fix-art-show-Chinese-art-when-the-card-s-default-pri.patch ← **按可用性挑印刷**——让真正有中文的印刷被选中
   0006-feat-scripts-generate-a-derived-locale-s-art-availab.patch ← 可用性表的生成脚本（必须有，否则 0005 不生效）
+  0007-fix-art-give-tokens-the-derived-locale-s-English-run.patch ← **衍生物的降级轮**——修复衍生物空图
 ```
 
 补丁内容也保存在一个分支上：`patches/zhs-card-art`（基于 `main` 的 `59b2b17`）。
@@ -139,6 +140,25 @@ https://images.mtgch.com/sf/normal/front/f/2/<uuid>.webp      ← 同一图床�
 
 **教训**：这类「只在某几条路径上生效」的疏漏，单元测试很难覆盖到——它需要针对
 **最普通的调用路径**写测试，而不是针对你以为的那条。
+
+## 同一类缺陷的第二次：衍生物空图（补丁 0007）
+
+衍生物也走同一条降级逻辑，但**走的是另一个函数**（`resolveImageUrl`，一个纯字符串函数），
+所以 0003 那次修复**没覆盖到它**。衍生物比卡牌更依赖这一轮：
+
+| 项目 | 数量 |
+| --- | --- |
+| WHO 衍生物 | 64 |
+| 有中文图 | 32 |
+| **中文无、英文有**（必须降级） | **32** |
+| 两级都无（真无解） | **0** |
+
+也就是说**一半的衍生物会走到第二轮**——没有它就会显示裂图而不是英文衍生物。
+
+**教训（和 0003 同一条，但这次加深了）**：在这个仓库里，「挂在一个地方就覆盖全部」是错的。
+同一种资产有**多条解析路径**（卡牌走 `resolveImageAsset`、衍生物走 `resolveImageUrl`、
+还有 by-ref 与 by-oracle-id 两个入口）。修一处之后，**必须把每条路径都过一遍**，
+而且每条路径都要有自己的回归测试。
 
 ## 必须补的一步：生成「中文可用性表」（补丁 0005 / 0006）
 

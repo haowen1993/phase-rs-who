@@ -1,0 +1,185 @@
+From cb1340176965ee29ee673a0321b66b0b195b91af Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Mon, 5 Oct 2026 00:57:31 +0800
+Subject: [PATCH 7/7] fix(art): give tokens the derived locale's English rung
+ too
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Reported: generated tokens render an empty image.
+
+Same defect class as the card path, in the one place it was still missing. The
+token asset resolves through `resolveImageUrl` — a pure string function — rather
+than `resolveImageAsset`, so attaching the rung at the asset funnel left tokens
+without one. It matters more here than for cards: across Doctor Who's 64 tokens,
+32 have a Chinese image and all 64 have an English one, so HALF of them hit the
+missing rung and rendered a broken tile instead of the English token. Measured:
+zero of the 64 have neither.
+
+Verified per token: the Chinese rung 404s, the English rung it walks to returns
+200 image/webp. Both resolution sites (by printing id and by oracle id + face)
+now carry it, and the `??=` that can replace a token's source keeps the rung of
+the asset it replaced.
+---
+ client/src/hooks/useCardImage.ts              |  8 +++
+ .../src/services/__tests__/scryfall.test.ts   | 63 +++++++++++++++++++
+ client/src/services/scryfall.ts               | 27 +++++++-
+ 3 files changed, 96 insertions(+), 2 deletions(-)
+
+diff --git a/client/src/hooks/useCardImage.ts b/client/src/hooks/useCardImage.ts
+index 091b3e6d25..74f967c2bb 100644
+--- a/client/src/hooks/useCardImage.ts
++++ b/client/src/hooks/useCardImage.ts
+@@ -769,10 +769,17 @@ async function acquireCachedImageSrc(
+     if (isToken) {
+       let remoteSrc: string | null = null;
+       let resolvedFaceIndex = faceIndex;
++      let remoteFallbackSrc: string | undefined;
+       if (tokenImageRef) {
+         try {
+           const tokenAsset = await fetchTokenImageAssetByRef(tokenImageRef, size);
+           remoteSrc = tokenAsset?.src ?? null;
++          // Half of Doctor Who's tokens have no Chinese image but all of them
++          // have an English one, so this rung is the difference between the
++          // English token and a broken tile. Carried on the asset beside `src`
++          // so it survives the `??=` below, which can replace the source but
++          // must not silently drop the rung of the one it replaces.
++          remoteFallbackSrc = tokenAsset?.fallbackSrc;
+           resolvedFaceIndex = tokenAsset?.faceIndex ?? resolvedFaceIndex;
+         } catch {
+           remoteSrc = null;
+@@ -797,6 +804,7 @@ async function acquireCachedImageSrc(
+           alias: cardName.toLowerCase().normalize("NFC"),
+         },
+         false,
++        remoteFallbackSrc,
+       );
+     } else if (oracleId) {
+       asset = await fetchCardImageAssetByOracleId(oracleId, faceName, size);
+diff --git a/client/src/services/__tests__/scryfall.test.ts b/client/src/services/__tests__/scryfall.test.ts
+index d5a577289f..ebe5958598 100644
+--- a/client/src/services/__tests__/scryfall.test.ts
++++ b/client/src/services/__tests__/scryfall.test.ts
+@@ -2300,6 +2300,69 @@ describe("derived locale fallback on the asset funnel", () => {
+   });
+ });
+ 
++/**
++ * Tokens need the derived locale's English rung for the same reason cards do,
++ * and need it more often.
++ *
++ * Regression: the token path resolves through `resolveImageUrl` (a pure string
++ * function) rather than `resolveImageAsset`, so attaching the rung only at the
++ * asset funnel left tokens without one. Measured across Doctor Who's 64 tokens,
++ * 32 have a Chinese image and all 64 have an English one — so half of them hit
++ * the missing rung and rendered a broken tile instead of the English token.
++ */
++describe("token assets carry the derived locale rung", () => {
++  const TOKEN_ID = "87d9dfbb-1bd8-4e7b-9945-498fde093d6c";
++
++  const tokenTable = () => jsonResponse({
++    [`scryfall:${TOKEN_ID}`]: {
++      name: "Copy",
++      face_names: ["copy"],
++      layout: "token",
++      faces: [{
++        normal: `https://cards.scryfall.io/normal/front/8/7/${TOKEN_ID}.jpg`,
++        art_crop: `https://cards.scryfall.io/art_crop/front/8/7/${TOKEN_ID}.jpg`,
++      }],
++      scryfall_id: TOKEN_ID,
++    },
++  });
++
++  beforeEach(() => {
++    vi.restoreAllMocks();
++  });
++
++  it("attaches the rung beside the Chinese source", async () => {
++    const mod = await loadScryfallModule();
++    global.fetch = vi.fn(() => Promise.resolve(tokenTable()));
++    await mod.loadLocaleArt("zhs");
++
++    const asset = await mod.fetchTokenImageAssetByRef(
++      { scryfall_id: TOKEN_ID, face_name: "Copy" } as never, "normal",
++    );
++
++    expect(asset).not.toBeNull();
++    expect(asset!.src).toContain("images.mtgch.com/zhs/");
++    expect(asset!.fallbackSrc).toBe(
++      `https://images.mtgch.com/sf/normal/front/8/7/${TOKEN_ID}.webp`,
++    );
++    // The rung is what a token whose Chinese art does not exist walks to.
++    const extra = mod.assetFallbackSources(asset!.src!, asset!.fallbackSrc, "normal");
++    expect(extra.map((source) => source.src)).toEqual([asset!.fallbackSrc]);
++  });
++
++  it("attaches no rung in English, where the base URL is the image", async () => {
++    const mod = await loadScryfallModule();
++    global.fetch = vi.fn(() => Promise.resolve(tokenTable()));
++    await mod.loadLocaleArt("en");
++
++    const asset = await mod.fetchTokenImageAssetByRef(
++      { scryfall_id: TOKEN_ID, face_name: "Copy" } as never, "normal",
++    );
++
++    expect(asset!.src).toBe(`https://cards.scryfall.io/normal/front/8/7/${TOKEN_ID}.jpg`);
++    expect(asset!.fallbackSrc).toBeUndefined();
++  });
++});
++
+ describe("derived art ladder ordering", () => {
+   const remote = (src: string) => ({ kind: "remote" as const, src });
+   const terminal = { kind: "fallback" as const, src: null };
+diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
+index 7a2a38b889..33582bb9bf 100644
+--- a/client/src/services/scryfall.ts
++++ b/client/src/services/scryfall.ts
+@@ -1520,6 +1520,15 @@ export async function fetchTokenImageUrl(
+ }
+ 
+ export interface TokenImageAssetByRef {
++  /**
++   * The derived locale's English rung for this token's art, or undefined.
++   *
++   * Tokens need it for the same reason cards do, and they need it MORE often:
++   * measured across Doctor Who's 64 tokens, 32 have a Chinese image and all 64
++   * have the English one, so half of them take the second rung. Without it a
++   * Chinese player sees a broken tile rather than the English token.
++   */
++  fallbackSrc?: string;
+   src: string;
+   faceIndex: number;
+ }
+@@ -1536,7 +1545,14 @@ export async function fetchTokenImageAssetByRef(
+     const faceIndex = ref.face_name
+       ? Math.max(0, idEntry.face_names.indexOf(ref.face_name.toLowerCase()))
+       : 0;
+-    return { src: resolveImageUrl(idEntry, faceIndex, size, idEntry.name), faceIndex };
++    const storedSrc = idEntry.faces[faceIndex]?.normal
++      ?? idEntry.faces[0]?.normal
++      ?? null;
++    return {
++      src: resolveImageUrl(idEntry, faceIndex, size, idEntry.name),
++      faceIndex,
++      fallbackSrc: storedSrc ? derivedArtFallbackUrl(storedSrc) : undefined,
++    };
+   }
+ 
+   if (ref.scryfall_oracle_id) {
+@@ -1546,7 +1562,14 @@ export async function fetchTokenImageAssetByRef(
+       const faceIndex = ref.face_name
+         ? Math.max(0, oracleEntry.face_names.indexOf(ref.face_name.toLowerCase()))
+         : 0;
+-      return { src: resolveImageUrl(oracleEntry, faceIndex, size, oracleEntry.name), faceIndex };
++      const storedSrc = oracleEntry.faces[faceIndex]?.normal
++        ?? oracleEntry.faces[0]?.normal
++        ?? null;
++      return {
++        src: resolveImageUrl(oracleEntry, faceIndex, size, oracleEntry.name),
++        faceIndex,
++        fallbackSrc: storedSrc ? derivedArtFallbackUrl(storedSrc) : undefined,
++      };
+     }
+   }
+ 

@@ -577,6 +577,13 @@ export const IMAGE_SIZE_WIDTHS: Record<"small" | "normal", number> = {
  * `errors.scryfall.com/soon.jpg` placeholder (one) — the latter must stay
  * byte-identical or `isPlaceholderImageUrl`'s `===` stops gating the
  * printing-fallback chain.
+ *
+ * A derived locale's CDN is deliberately NOT recognized here. Its URLs carry an
+ * extra language prefix, and treating that shape as sized would erase a
+ * distinction upstream relies on: six path segments is asserted to be
+ * non-derivable precisely so malformed input cannot acquire a ladder. Its size
+ * is therefore passed explicitly to the one consumer that needs it
+ * (`assetFallbackSources`) rather than inferred from the URL.
  */
 function splitSizedImageUrl(
   url: string | null | undefined,
@@ -634,6 +641,12 @@ export function deriveImageUrl(url: string, size: ImageSize): string {
  * alike, and are WebP rather than JPEG. `art_crop` exists ONLY on `/sf/` — see
  * `derivedArtSource` for why an art crop is nevertheless left alone.
  */
+/** The Scryfall CDN host every stored art URL is built on. */
+const SCRYFALL_IMAGE_HOST = "cards.scryfall.io";
+
+/** The single host a derived art locale's CDN lives on. */
+const DERIVED_ART_HOST = "images.mtgch.com";
+
 export interface DerivedArtSource {
   /** URL for a five-segment Scryfall image URL, or null when this rung does not exist. */
   readonly url: string;
@@ -669,7 +682,7 @@ function derivedArtSource(url: string, lang: DerivedArtLocale): DerivedArtSource
   const [host, size, face, shardA, shardB, filename] = parsed.segments;
   // Only the Scryfall CDN carries the printing id in the shape this derivation
   // reads. A URL already on another host keeps its own identity.
-  if (host !== "cards.scryfall.io") return null;
+  if (host !== SCRYFALL_IMAGE_HOST) return null;
   // Language-neutral, and already cached under its Scryfall URL — see above.
   if (size === "art_crop") return null;
   // A UUID contains no `.`, so the first dot always ends the id.
@@ -679,7 +692,7 @@ function derivedArtSource(url: string, lang: DerivedArtLocale): DerivedArtSource
   // Written out rather than `lang` interpolated straight in: the prefix is a
   // third-party path contract, and spelling both keeps them greppable together.
   const zhPrefix = lang === "zhs" ? "zhs" : "sf";
-  const base = `https://images.mtgch.com`;
+  const base = `https://${DERIVED_ART_HOST}`;
   const path = `${size}/${face}/${shardA}/${shardB}/${printingId}.webp`;
   return {
     url: `${base}/${zhPrefix}/${path}`,
@@ -828,6 +841,14 @@ function remoteImageSource(src: string, size: ImageSize): { source: CardImageSou
  * URL, in order — empty for every other locale, and for any URL that has no
  * derived rung.
  *
+ * `size` is passed in rather than read back off `fallbackSrc`.
+ * `imageUrlSize`/`deriveImageUrl` deliberately recognize only Scryfall's flat
+ * `/size/face/…` shape; a derived locale's CDN puts a language prefix in front
+ * of the size, and admitting that shape would erase a distinction upstream
+ * relies on — its tests assert six path segments is NOT size-derivable, so
+ * malformed input cannot acquire a responsive ladder. The caller already knows
+ * which rung it asked for, so it says so instead of the URL being re-parsed.
+ *
  * Kept separate from `assetImageSources` so a caller that already has a resolved
  * ladder can append without rebuilding it, and so the no-derived-locale path
  * touches nothing: the six mapped languages produce `[]` here regardless of what
@@ -836,9 +857,9 @@ function remoteImageSource(src: string, size: ImageSize): { source: CardImageSou
 export function assetFallbackSources(
   src: string,
   fallbackSrc: string | undefined,
+  size: ImageSize,
 ): CardImageSource[] {
-  const size = fallbackSrc ? imageUrlSize(fallbackSrc) : null;
-  if (!fallbackSrc || !size || fallbackSrc === src) return [];
+  if (!fallbackSrc || fallbackSrc === src) return [];
   const { source } = remoteImageSource(fallbackSrc, size);
   return [source];
 }

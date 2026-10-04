@@ -232,10 +232,11 @@ function remoteAsset(
 function withAssetSources(
   sources: CardImageSource[],
   asset: CardImageAsset,
+  size: ImageSize,
 ): CardImageSource[] {
   return insertBeforeTerminalFallback(
     sources,
-    assetFallbackSources(asset.src, asset.fallbackSrc).filter(
+    assetFallbackSources(asset.src, asset.fallbackSrc, size).filter(
       (candidate) => !sources.some((existing) => existing.src === candidate.src),
     ),
   );
@@ -1201,7 +1202,7 @@ export function useCardImage(
           });
           const viable = result.sources.filter((source) =>
             source.src === null || !failedSources.current.values.has(source.src));
-          publish(viable.length > 0 ? withAssetSources(viable, imageAsset) : fallback, imageAsset);
+          publish(viable.length > 0 ? withAssetSources(viable, imageAsset, size) : fallback, imageAsset);
         } catch {
           publish(fallback);
         } finally {

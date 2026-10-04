@@ -2300,6 +2300,69 @@ describe("derived locale fallback on the asset funnel", () => {
   });
 });
 
+/**
+ * Tokens need the derived locale's English rung for the same reason cards do,
+ * and need it more often.
+ *
+ * Regression: the token path resolves through `resolveImageUrl` (a pure string
+ * function) rather than `resolveImageAsset`, so attaching the rung only at the
+ * asset funnel left tokens without one. Measured across Doctor Who's 64 tokens,
+ * 32 have a Chinese image and all 64 have an English one — so half of them hit
+ * the missing rung and rendered a broken tile instead of the English token.
+ */
+describe("token assets carry the derived locale rung", () => {
+  const TOKEN_ID = "87d9dfbb-1bd8-4e7b-9945-498fde093d6c";
+
+  const tokenTable = () => jsonResponse({
+    [`scryfall:${TOKEN_ID}`]: {
+      name: "Copy",
+      face_names: ["copy"],
+      layout: "token",
+      faces: [{
+        normal: `https://cards.scryfall.io/normal/front/8/7/${TOKEN_ID}.jpg`,
+        art_crop: `https://cards.scryfall.io/art_crop/front/8/7/${TOKEN_ID}.jpg`,
+      }],
+      scryfall_id: TOKEN_ID,
+    },
+  });
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("attaches the rung beside the Chinese source", async () => {
+    const mod = await loadScryfallModule();
+    global.fetch = vi.fn(() => Promise.resolve(tokenTable()));
+    await mod.loadLocaleArt("zhs");
+
+    const asset = await mod.fetchTokenImageAssetByRef(
+      { scryfall_id: TOKEN_ID, face_name: "Copy" } as never, "normal",
+    );
+
+    expect(asset).not.toBeNull();
+    expect(asset!.src).toContain("images.mtgch.com/zhs/");
+    expect(asset!.fallbackSrc).toBe(
+      `https://images.mtgch.com/sf/normal/front/8/7/${TOKEN_ID}.webp`,
+    );
+    // The rung is what a token whose Chinese art does not exist walks to.
+    const extra = mod.assetFallbackSources(asset!.src!, asset!.fallbackSrc, "normal");
+    expect(extra.map((source) => source.src)).toEqual([asset!.fallbackSrc]);
+  });
+
+  it("attaches no rung in English, where the base URL is the image", async () => {
+    const mod = await loadScryfallModule();
+    global.fetch = vi.fn(() => Promise.resolve(tokenTable()));
+    await mod.loadLocaleArt("en");
+
+    const asset = await mod.fetchTokenImageAssetByRef(
+      { scryfall_id: TOKEN_ID, face_name: "Copy" } as never, "normal",
+    );
+
+    expect(asset!.src).toBe(`https://cards.scryfall.io/normal/front/8/7/${TOKEN_ID}.jpg`);
+    expect(asset!.fallbackSrc).toBeUndefined();
+  });
+});
+
 describe("derived art ladder ordering", () => {
   const remote = (src: string) => ({ kind: "remote" as const, src });
   const terminal = { kind: "fallback" as const, src: null };

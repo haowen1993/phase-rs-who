@@ -769,10 +769,17 @@ async function acquireCachedImageSrc(
     if (isToken) {
       let remoteSrc: string | null = null;
       let resolvedFaceIndex = faceIndex;
+      let remoteFallbackSrc: string | undefined;
       if (tokenImageRef) {
         try {
           const tokenAsset = await fetchTokenImageAssetByRef(tokenImageRef, size);
           remoteSrc = tokenAsset?.src ?? null;
+          // Half of Doctor Who's tokens have no Chinese image but all of them
+          // have an English one, so this rung is the difference between the
+          // English token and a broken tile. Carried on the asset beside `src`
+          // so it survives the `??=` below, which can replace the source but
+          // must not silently drop the rung of the one it replaces.
+          remoteFallbackSrc = tokenAsset?.fallbackSrc;
           resolvedFaceIndex = tokenAsset?.faceIndex ?? resolvedFaceIndex;
         } catch {
           remoteSrc = null;
@@ -797,6 +804,7 @@ async function acquireCachedImageSrc(
           alias: cardName.toLowerCase().normalize("NFC"),
         },
         false,
+        remoteFallbackSrc,
       );
     } else if (oracleId) {
       asset = await fetchCardImageAssetByOracleId(oracleId, faceName, size);

@@ -1520,6 +1520,15 @@ export async function fetchTokenImageUrl(
 }
 
 export interface TokenImageAssetByRef {
+  /**
+   * The derived locale's English rung for this token's art, or undefined.
+   *
+   * Tokens need it for the same reason cards do, and they need it MORE often:
+   * measured across Doctor Who's 64 tokens, 32 have a Chinese image and all 64
+   * have the English one, so half of them take the second rung. Without it a
+   * Chinese player sees a broken tile rather than the English token.
+   */
+  fallbackSrc?: string;
   src: string;
   faceIndex: number;
 }
@@ -1536,7 +1545,14 @@ export async function fetchTokenImageAssetByRef(
     const faceIndex = ref.face_name
       ? Math.max(0, idEntry.face_names.indexOf(ref.face_name.toLowerCase()))
       : 0;
-    return { src: resolveImageUrl(idEntry, faceIndex, size, idEntry.name), faceIndex };
+    const storedSrc = idEntry.faces[faceIndex]?.normal
+      ?? idEntry.faces[0]?.normal
+      ?? null;
+    return {
+      src: resolveImageUrl(idEntry, faceIndex, size, idEntry.name),
+      faceIndex,
+      fallbackSrc: storedSrc ? derivedArtFallbackUrl(storedSrc) : undefined,
+    };
   }
 
   if (ref.scryfall_oracle_id) {
@@ -1546,7 +1562,14 @@ export async function fetchTokenImageAssetByRef(
       const faceIndex = ref.face_name
         ? Math.max(0, oracleEntry.face_names.indexOf(ref.face_name.toLowerCase()))
         : 0;
-      return { src: resolveImageUrl(oracleEntry, faceIndex, size, oracleEntry.name), faceIndex };
+      const storedSrc = oracleEntry.faces[faceIndex]?.normal
+        ?? oracleEntry.faces[0]?.normal
+        ?? null;
+      return {
+        src: resolveImageUrl(oracleEntry, faceIndex, size, oracleEntry.name),
+        faceIndex,
+        fallbackSrc: storedSrc ? derivedArtFallbackUrl(storedSrc) : undefined,
+      };
     }
   }
 

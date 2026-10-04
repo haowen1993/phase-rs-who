@@ -453,9 +453,36 @@ fi
 # Filters MTGJSON's preconstructed decks to those whose every card the engine
 # can run right now. Always emits the debug `--emit-skipped` sidecar in dev
 # builds so parser coverage gaps surface as "decks blocked by card X".
+#
+# PHASE_DECKS_SCOPE narrows the emitted catalog to deck ids matching a suffix,
+# for channel builds that ship one product instead of the whole precon history
+# (e.g. `_WHO` for the four Doctor Who Commander decks). Unset — the default,
+# and what upstream and CI run — emits every deck, unchanged.
 DECKS_OUTPUT_TMP="${DECKS_OUTPUT}.tmp"
 track_tmp "$DECKS_OUTPUT_TMP"
 if "$TOOL_BIN/oracle-gen" decks "$DATA_DIR" "$DECKS_OUTPUT_TMP" --emit-skipped; then
+  if [ -n "${PHASE_DECKS_SCOPE:-}" ]; then
+    # Filter in place, between generation and promotion, so the scope costs no
+    # engine-side argument and the unfiltered output is never promoted. A scope
+    # that selects nothing is treated as a failure below rather than promoted:
+    # an empty catalog is indistinguishable at runtime from "no precons exist",
+    # which is a much worse failure than a loud warning here.
+    DECKS_SCOPED_TMP="${DECKS_OUTPUT_TMP}.scoped"
+    track_tmp "$DECKS_SCOPED_TMP"
+    if jq -e --arg scope "$PHASE_DECKS_SCOPE" \
+        'type == "object" and (with_entries(select(.key | endswith($scope))) | length > 0)' \
+        "$DECKS_OUTPUT_TMP" >/dev/null 2>&1; then
+      jq --arg scope "$PHASE_DECKS_SCOPE" \
+        'with_entries(select(.key | endswith($scope)))' "$DECKS_OUTPUT_TMP" > "$DECKS_SCOPED_TMP"
+      mv "$DECKS_SCOPED_TMP" "$DECKS_OUTPUT_TMP"
+      untrack_tmp "$DECKS_SCOPED_TMP"
+      echo "Scoped decks to ids ending in '$PHASE_DECKS_SCOPE' ($(jq 'length' "$DECKS_OUTPUT_TMP") decks)"
+    else
+      rm -f "$DECKS_SCOPED_TMP"
+      untrack_tmp "$DECKS_SCOPED_TMP"
+      echo "WARNING: PHASE_DECKS_SCOPE='$PHASE_DECKS_SCOPE' matched no deck; leaving the unscoped catalog in place." >&2
+    fi
+  fi
   if jq -e 'type == "object"' "$DECKS_OUTPUT_TMP" >/dev/null 2>&1; then
     promote_tmp "$DECKS_OUTPUT_TMP" "$DECKS_OUTPUT"
     echo "Promoted $DECKS_OUTPUT"

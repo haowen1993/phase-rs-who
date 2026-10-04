@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CARD_BACK_URL,
   assetFallbackSources,
-  derivedArtFallbackUrl,
   fetchCardImageAsset,
   fetchCardImageAssetByOracleId,
   fetchTokenImageAssetByRef,
@@ -261,19 +260,6 @@ export function insertBeforeTerminalFallback(
   const terminal = sources.findIndex((source) => source.kind === "fallback");
   if (terminal < 0) return [...sources, ...extra];
   return [...sources.slice(0, terminal), ...extra, ...sources.slice(terminal)];
-}
-
-/**
- * Attach the active derived art locale's English rung, if it has one.
- *
- * Applied at the one place an asset is first built rather than at each publish
- * site, so every route into the ladder — the art-chain override, the printing
- * fallback, the cached remote acquisition — carries the same second rung.
- */
-function withArtFallback(asset: CardImageAsset): CardImageAsset {
-  const fallbackSrc = derivedArtFallbackUrl(asset.src);
-  if (!fallbackSrc || fallbackSrc === asset.src) return asset;
-  return { ...asset, fallbackSrc };
 }
 
 function metadataRepositoryGroups(
@@ -801,7 +787,7 @@ async function acquireCachedImageSrc(
           ? decodeTokenFilterKeywords(filterKeywords)
           : undefined,
       });
-      asset = withArtFallback(remoteAsset(
+      asset = remoteAsset(
         remoteSrc,
         size,
         {
@@ -810,7 +796,7 @@ async function acquireCachedImageSrc(
           alias: cardName.toLowerCase().normalize("NFC"),
         },
         false,
-      ));
+      );
     } else if (oracleId) {
       asset = await fetchCardImageAssetByOracleId(oracleId, faceName, size);
     } else {
@@ -824,10 +810,10 @@ async function acquireCachedImageSrc(
         && printing.collector_number === sourcePrinting.collectorNumber);
       const sourceUrl = source && resolvePrintingImageUrl(source, asset.semantic.faceIndex, size);
       if (sourceUrl) {
-        asset = withArtFallback(remoteAsset(sourceUrl, size, {
+        asset = remoteAsset(sourceUrl, size, {
           ...asset.semantic,
           englishPrintingId: source.id.toLowerCase(),
-        }, asset.isRotated));
+        }, asset.isRotated);
       }
     }
     entry.asset = asset;
@@ -1150,7 +1136,7 @@ export function useCardImage(
         overridePrintingId = source?.id ?? "";
       }
       return overrideUrl
-        ? withArtFallback(remoteAsset(
+        ? remoteAsset(
             overrideUrl,
             size,
             {
@@ -1160,7 +1146,7 @@ export function useCardImage(
               alias: cardName.toLowerCase().normalize("NFC"),
             },
             isCardImageRotatedSync(resolvedOracleId, cardName),
-          ))
+          )
         : null;
     };
 

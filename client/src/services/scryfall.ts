@@ -1201,12 +1201,29 @@ function resolveImageAsset(
   size: ImageSize,
   diagnosticName: string,
 ): CardImageAsset {
+  const face = entry.faces[faceIndex] ?? entry.faces[0];
+  // Derived BEFORE localization, and from the pre-localization URL.
+  //
+  // The rung this returns is the English art of the SAME printing, so the URL it
+  // must be derived from is the Scryfall CDN one — `derivedArtSource` reads the
+  // printing id out of `cards.scryfall.io` paths and returns null for anything
+  // else. Deriving from the already-localized URL silently yielded undefined and
+  // the ladder lost its second step, which is exactly the failure this rung
+  // exists to prevent.
+  const storedSrc = face?.normal ?? null;
+  const fallbackSrc = storedSrc ? derivedArtFallbackUrl(storedSrc) : undefined;
   const src = resolveImageUrl(entry, faceIndex, size, diagnosticName);
   const remote = remoteImageSource(src, size);
   return {
     src,
     isRotated: isSidewaysLayout(entry.layout),
     ...remote,
+    // Attached HERE, at the one funnel every stored-image asset is built
+    // through, rather than at each consumer. Doing it in `useCardImage` covered
+    // only its override paths (tokens, a pinned source printing, an art chain)
+    // and missed this one — the path a card with no art preferences at all
+    // takes.
+    fallbackSrc,
     semantic: {
       oracleId: entry.oracle_id.toLowerCase(),
       faceIndex,

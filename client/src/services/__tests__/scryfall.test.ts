@@ -2223,6 +2223,83 @@ describe("derived card art locales", () => {
  * English art sitting in the array. These cases pin the splice position, which a
  * plain "the source is present" assertion would not catch.
  */
+/**
+ * The derived locale's English rung must be attached by the asset funnel, and
+ * derived from the PRE-localization URL.
+ *
+ * Regression for a real defect: the rung was attached by `useCardImage`'s
+ * override paths only, so a card taking the ordinary path (`fetchCardImageAsset`
+ * with no art preferences) had no second ladder step at all — its Chinese image
+ * 404'd straight past the English art and rendered the text placeholder. The
+ * first attempt at the fix then derived the rung from the already-localized URL,
+ * and `derivedArtSource` returns null for any host but `cards.scryfall.io`, so it
+ * silently produced undefined again.
+ *
+ * `Temple of Mystery` and `Time Wipe` are the reported cases: both have a live
+ * Scryfall image and no Simplified-Chinese one.
+ */
+describe("derived locale fallback on the asset funnel", () => {
+  const ORACLE = "7e26f0b7-20e6-46d5-8130-d98c14d6aa29";
+  const STORED_NORMAL =
+    "https://cards.scryfall.io/normal/front/2/5/258077cf-edef-40fe-ab46-03c965ebe990.jpg?1783903715";
+  // The loader keys by lowercased oracle_id and needs face_names for the
+  // oracle-id + face-name lookup, so this is the shape it actually parses.
+  const ENTRY = {
+    name: "Temple of Mystery",
+    oracle_id: ORACLE,
+    face_names: ["temple of mystery"],
+    mana_cost: "{1}",
+    cmc: 1,
+    type_line: "Land",
+    colors: [],
+    color_identity: [],
+    keywords: [],
+    layout: "normal",
+    faces: [{
+      normal: STORED_NORMAL,
+      art_crop: "https://cards.scryfall.io/art_crop/front/2/5/258077cf-edef-40fe-ab46-03c965ebe990.jpg",
+    }],
+  };
+  const stubData = () => jsonResponse({ [ORACLE]: ENTRY });
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("attaches the English rung to an asset built from a stored entry", async () => {
+    const mod = await loadScryfallModule();
+    global.fetch = vi.fn(() => Promise.resolve(stubData()));
+    await mod.loadLocaleArt("zhs");
+
+    const asset = await mod.fetchCardImageAssetByOracleId(
+      ORACLE, "Temple of Mystery", "normal",
+    );
+
+    // The preferred rung is Chinese, and the fallback is its English twin at the
+    // same printing id — which is exactly what must be reachable on a 404.
+    expect(asset.src).toContain("images.mtgch.com/zhs/");
+    expect(asset.fallbackSrc).toBe(
+      "https://images.mtgch.com/sf/normal/front/2/5/258077cf-edef-40fe-ab46-03c965ebe990.webp",
+    );
+    // Non-vacuity: an unset rung is the defect this pins.
+    expect(asset.fallbackSrc).not.toBeUndefined();
+    expect(asset.fallbackSrc).not.toBe(asset.src);
+  });
+
+  it("derives no rung in English, where the base URL is already the rung", async () => {
+    const mod = await loadScryfallModule();
+    global.fetch = vi.fn(() => Promise.resolve(stubData()));
+    await mod.loadLocaleArt("en");
+
+    const asset = await mod.fetchCardImageAssetByOracleId(
+      ORACLE, "Temple of Mystery", "normal",
+    );
+
+    expect(asset.src).toBe(STORED_NORMAL);
+    expect(asset.fallbackSrc).toBeUndefined();
+  });
+});
+
 describe("derived art ladder ordering", () => {
   const remote = (src: string) => ({ kind: "remote" as const, src });
   const terminal = { kind: "fallback" as const, src: null };

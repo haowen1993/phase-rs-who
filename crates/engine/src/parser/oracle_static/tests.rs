@@ -13678,7 +13678,9 @@ fn static_grant_replicate_hatchery_sliver() {
     assert_eq!(
         def.mode,
         StaticMode::CastWithKeyword {
-            keyword: Keyword::Replicate(ManaCost::SelfManaCost),
+            keyword: Keyword::Replicate(AbilityCost::Mana {
+                cost: ManaCost::SelfManaCost,
+            }),
         }
     );
     let Some(TargetFilter::Typed(tf)) = &def.affected else {

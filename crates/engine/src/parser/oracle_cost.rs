@@ -39,6 +39,15 @@ use crate::types::zones::Zone;
 /// Returns an AbilityCost (possibly Composite for multi-part costs).
 pub fn parse_oracle_cost(text: &str) -> AbilityCost {
     let text = text.trim();
+    // A cost phrase arrives as a sentence fragment. When reminder text is
+    // stripped before this call the sentence period can survive as the last
+    // character ("Tap an untapped Dalek you control." reached us from the
+    // Replicate/Fallback em-dash form), and a trailing period defeats every
+    // `remainder.trim().is_empty()` guard in `parse_single_cost` — the cost then
+    // silently falls through to the `EffectCost` parser, which produces a
+    // cost that `supports_effect_cost_payment` rejects at runtime. Dropping the
+    // terminal period here fixes the class rather than one caller.
+    let text = text.trim_end_matches('.').trim();
     let lower = text.to_lowercase();
 
     if let Some(cost) = parse_oxford_mana_alternatives_nom(&lower)
@@ -2413,6 +2422,44 @@ fn parse_mana_cost_nom(
                 nom::error::ErrorKind::Tag,
             ),
         )),
+    }
+}
+
+#[cfg(test)]
+mod trailing_period_tests {
+    use super::*;
+
+    /// A cost phrase reaching `parse_oracle_cost` with a sentence period must
+    /// parse identically to the bare phrase.
+    ///
+    /// Regression: stripping reminder text from an em-dash cost form
+    /// ("Tap an untapped Dalek you control. (When you cast this spell, …)")
+    /// leaves the period attached. Every `remainder.trim().is_empty()` guard in
+    /// `parse_single_cost` then fails, the cost falls through to the generic
+    /// `EffectCost` parser, and the resulting `SetTapState` cost is rejected by
+    /// `supports_effect_cost_payment` at runtime — a parse that looks successful
+    /// and a card that cannot be used.
+    #[test]
+    fn a_trailing_sentence_period_does_not_change_the_cost() {
+        for phrase in [
+            "Tap an untapped Dalek you control",
+            "Tap two untapped creatures you control",
+            "Sacrifice a creature",
+        ] {
+            assert_eq!(
+                parse_oracle_cost(&format!("{phrase}.")),
+                parse_oracle_cost(phrase),
+                "trailing period changed the parse of {phrase:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_trailing_period_still_yields_a_payable_tap_cost() {
+        assert!(matches!(
+            parse_oracle_cost("Tap an untapped Dalek you control."),
+            AbilityCost::TapCreatures { .. }
+        ));
     }
 }
 

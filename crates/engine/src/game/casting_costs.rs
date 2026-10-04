@@ -10746,11 +10746,7 @@ pub(super) fn effective_replicate_additional_cost_instances(
             // CR 601.2f: Additional costs must be concrete before affordability
             // and payment; Hatchery Sliver's `SelfManaCost` is the recipient
             // spell's mana cost, not a free placeholder.
-            let cost = super::keywords::resolve_self_mana_in_ability_cost(
-                state,
-                object_id,
-                &AbilityCost::Mana { cost },
-            );
+            let cost = super::keywords::resolve_self_mana_in_ability_cost(state, object_id, &cost);
             AdditionalCostInstance::new_with_ordinal(
                 AdditionalCostOrigin::Replicate,
                 u32::try_from(ordinal).unwrap_or(u32::MAX),
@@ -25763,7 +25759,9 @@ its replicate cost was paid.)\nDraw a card.";
             generic: 1,
         };
         StaticDefinition::new(StaticMode::CastWithKeyword {
-            keyword: Keyword::Replicate(replicate_cost),
+            keyword: Keyword::Replicate(AbilityCost::Mana {
+                cost: replicate_cost,
+            }),
         })
         .affected(TargetFilter::Typed(
             TypedFilter::new(TypeFilter::Instant).controller(ControllerRef::You),

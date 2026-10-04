@@ -343,25 +343,44 @@ const MANA_COST_KEYWORDS = new Set([
   "Harmonize", "Foretell", "Mutate", "Disturb", "Overload",
   "Spectacle", "Surge", "Encore", "Entwine", "Outlast", "Scavenge", "Fortify",
   "Plot", "Offspring", "LevelUp", "Warp", "Sneak", "WebSlinging", "Squad",
-  "Transmute", "Transfigure", "Recover", "Cleave", "Replicate",
+  "Transmute", "Transfigure", "Recover", "Cleave",
   "MoreThanMeetsTheEye", "Freerunning", "Specialize",
 ]);
 
 /**
- * Keywords whose payload is a `{ type: "Mana", data: ManaCost }` or
- * `{ type: "NonMana", data: AbilityCost }` cost (FlashbackCost and siblings).
+ * Keywords whose payload is a mana cost or a non-mana cost, tagged
+ * `{ type, data }` for the sibling cost enums (FlashbackCost and friends) and
+ * `{ type, cost }` for a bare `AbilityCost`.
+ *
+ * `Replicate` is in this group rather than `MANA_COST_KEYWORDS` because a
+ * replicate cost is not always mana — Exterminate! prints
+ * "Replicate—Tap an untapped Dalek you control", which is an
+ * `AbilityCost::TapCreatures`.
  */
 const MANA_OR_NON_MANA_COST_KEYWORDS = new Set([
   "Bestow", "Embalm", "Eternalize", "Cycling", "Flashback", "Escape", "Evoke",
-  "Buyback", "Echo", "Blitz",
+  "Buyback", "Echo", "Blitz", "Replicate",
 ]);
 
 /** Keywords whose payload is an AbilityCost. */
 const ABILITY_COST_KEYWORDS = new Set(["CumulativeUpkeep", "Escalate"]);
 
-function formatManaOrNonManaCost(val: { type: string; data: unknown }): string | null {
-  if (val.type === "Mana") return formatKeywordManaCost(val.data as ManaCost);
-  return formatKeywordAbilityCost(val.data as KeywordAbilityCost);
+/**
+ * The cost payload sits under `data` for the adjacent-tagged sibling enums
+ * (FlashbackCost, BlitzCost, BestowCost, CyclingCost) but under `cost` for a
+ * bare `AbilityCost`, whose serde is internally tagged
+ * (`{ type: "Mana", cost: {...} }`). `Keyword::Replicate` is the latter, so both
+ * keys are read; reading only `data` rendered every replicate cost blank.
+ */
+function formatManaOrNonManaCost(val: {
+  type: string;
+  data?: unknown;
+  cost?: unknown;
+}): string | null {
+  const payload = val.data ?? val.cost;
+  if (payload == null) return null;
+  if (val.type === "Mana") return formatKeywordManaCost(payload as ManaCost);
+  return formatKeywordAbilityCost(payload as KeywordAbilityCost);
 }
 
 type KeywordAbilityCost = Parameters<typeof formatKnownCost>[0];

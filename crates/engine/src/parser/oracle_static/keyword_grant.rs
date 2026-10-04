@@ -255,7 +255,14 @@ fn parse_granted_self_cost_keyword(keyword_str: &str) -> Option<Keyword> {
             (|c| Keyword::Blitz(crate::types::keywords::BlitzCost::Mana(c)))
                 as fn(ManaCost) -> Keyword,
         ),
-        ("replicate", Keyword::Replicate as fn(ManaCost) -> Keyword),
+        // CR 702.56a: like blitz above, a GRANTED self-referential replicate is
+        // always pure mana ("the replicate cost is equal to its mana cost"), so the
+        // grant binds `AbilityCost::Mana`. The em-dash non-mana form is printed
+        // text on the card itself, never granted.
+        (
+            "replicate",
+            (|c| Keyword::Replicate(AbilityCost::Mana { cost: c })) as fn(ManaCost) -> Keyword,
+        ),
     ]
     .into_iter()
     .find_map(|(name, ctor)| {

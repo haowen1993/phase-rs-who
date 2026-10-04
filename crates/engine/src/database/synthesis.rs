@@ -2595,13 +2595,14 @@ pub fn synthesize_replicate(face: &mut CardFace) {
     }
 
     // CR 702.56a: "As an additional cost to cast this spell, you may pay [cost]
-    // any number of times." Repeatable optional mana cost — the cast-time
-    // payment loop records each payment in `additional_cost_payment_count`.
+    // any number of times." Repeatable optional cost — the cast-time payment
+    // loop records each payment in `additional_cost_payment_count`.
     if face.additional_cost.is_none() {
         face.additional_cost = Some(AdditionalCost::Optional {
-            cost: AbilityCost::Mana {
-                cost: replicate_costs[0].clone(),
-            },
+            // Already an `AbilityCost`: `Keyword::Replicate` holds the parsed
+            // cost directly so a non-mana replicate cost (Exterminate!'s "Tap
+            // an untapped Dalek you control") reaches this slot unwrapped.
+            cost: replicate_costs[0].clone(),
             repeatability: crate::types::ability::AdditionalCostRepeatability::Repeatable,
         });
     }
@@ -20182,7 +20183,9 @@ mod replicate_synthesis_tests {
             shards: vec![ManaCostShard::Blue],
         };
         let mut face = CardFace {
-            keywords: vec![Keyword::Replicate(replicate_cost.clone())],
+            keywords: vec![Keyword::Replicate(AbilityCost::Mana {
+                cost: replicate_cost.clone(),
+            })],
             ..CardFace::default()
         };
 
@@ -20238,9 +20241,11 @@ mod replicate_synthesis_tests {
     #[test]
     fn synthesize_replicate_is_idempotent() {
         let mut face = CardFace {
-            keywords: vec![Keyword::Replicate(ManaCost::Cost {
-                generic: 2,
-                shards: vec![],
+            keywords: vec![Keyword::Replicate(AbilityCost::Mana {
+                cost: ManaCost::Cost {
+                    generic: 2,
+                    shards: vec![],
+                },
             })],
             ..CardFace::default()
         };
@@ -20260,13 +20265,17 @@ mod replicate_synthesis_tests {
     fn synthesize_replicate_emits_one_trigger_per_instance() {
         let mut face = CardFace {
             keywords: vec![
-                Keyword::Replicate(ManaCost::Cost {
-                    generic: 1,
-                    shards: vec![],
+                Keyword::Replicate(AbilityCost::Mana {
+                    cost: ManaCost::Cost {
+                        generic: 1,
+                        shards: vec![],
+                    },
                 }),
-                Keyword::Replicate(ManaCost::Cost {
-                    generic: 2,
-                    shards: vec![],
+                Keyword::Replicate(AbilityCost::Mana {
+                    cost: ManaCost::Cost {
+                        generic: 2,
+                        shards: vec![],
+                    },
                 }),
             ],
             ..CardFace::default()

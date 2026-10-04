@@ -834,11 +834,14 @@
     },
     {
       "Replicate": {
-        "generic": 2,
-        "shards": [
-          "Red"
-        ],
-        "type": "Cost"
+        "cost": {
+          "generic": 2,
+          "shards": [
+            "Red"
+          ],
+          "type": "Cost"
+        },
+        "type": "Mana"
       }
     },
     {

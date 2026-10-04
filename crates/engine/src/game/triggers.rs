@@ -37859,7 +37859,9 @@ pub mod tests {
             Zone::Battlefield,
         );
         let grant = StaticDefinition::new(StaticMode::CastWithKeyword {
-            keyword: Keyword::Replicate(ManaCost::SelfManaCost),
+            keyword: Keyword::Replicate(AbilityCost::Mana {
+                cost: ManaCost::SelfManaCost,
+            }),
         })
         .affected(TargetFilter::Typed(
             TypedFilter::new(TypeFilter::Subtype("Sliver".into())).controller(ControllerRef::You),

@@ -1152,7 +1152,7 @@ pub enum Keyword {
     /// replicate cost was paid. If the spell has any targets, you may
     /// choose new targets for any of the copies." Carries the per-copy
     /// mana cost.
-    Replicate(ManaCost),
+    Replicate(AbilityCost),
 
     /// CR 702.113a: Awaken N—{cost} — alternative cost that also puts N +1/+1
     /// counters on target land you control, animating it as a 0/0 Elemental
@@ -2887,7 +2887,11 @@ impl FromStr for Keyword {
                 "squad" => return Ok(Keyword::Squad(parse_keyword_mana_cost(p))),
                 // CR 702.56a: Replicate {cost} — repeatable optional additional
                 // cost paid at cast; copy the spell once per payment.
-                "replicate" => return Ok(Keyword::Replicate(parse_keyword_mana_cost(p))),
+                "replicate" => {
+                    return Ok(Keyword::Replicate(AbilityCost::Mana {
+                        cost: parse_keyword_mana_cost(p),
+                    }))
+                }
                 // CR 702.29: Typecycling — "typecycling:{subtype}:{cost}"
                 "typecycling" => {
                     if let Some(colon_pos) = p.find(':') {
@@ -3877,8 +3881,19 @@ fn keyword_from_tagged(variant: &str, data: &serde_json::Value) -> Result<Keywor
         }
         // CR 702.157
         "Squad" => Ok(Keyword::Squad(mana(data)?)),
-        // CR 702.56a: Replicate {cost}
-        "Replicate" => Ok(Keyword::Replicate(mana(data)?)),
+        // CR 702.56a: Replicate {cost} — the cost is an `AbilityCost`, because a
+        // replicate cost is not always mana (Exterminate!'s "Tap an untapped
+        // Dalek you control"). Accepts BOTH shapes so already-emitted
+        // card-data.json files keep loading: the current tagged form
+        // (`{"type":"Mana",...}` / `{"type":"TapCreatures",...}`) and the
+        // pre-widening bare `ManaCost` object.
+        "Replicate" => {
+            if let Ok(cost) = serde_json::from_value::<AbilityCost>(data.clone()) {
+                Ok(Keyword::Replicate(cost))
+            } else {
+                Ok(Keyword::Replicate(AbilityCost::Mana { cost: mana(data)? }))
+            }
+        }
         // CR 702.29
         "Typecycling" => {
             let obj = data.as_object().ok_or("Typecycling: expected object")?;
@@ -5815,7 +5830,7 @@ mod tests {
             Keyword::Escalate(pay_life_cost()),
             Keyword::Recover(mc("{2}{R}")),
             Keyword::Cleave(mc("{2}{R}")),
-            Keyword::Replicate(mc("{2}{R}")),
+            Keyword::Replicate(AbilityCost::Mana { cost: mc("{2}{R}") }),
             Keyword::Awaken {
                 count: 4,
                 cost: mc("{5}{W}{W}{W}"),

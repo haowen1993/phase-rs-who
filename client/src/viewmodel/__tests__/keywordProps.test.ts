@@ -56,6 +56,32 @@ describe("getKeywordDetail", () => {
     expect(getKeywordDetail("Haste")).toBeNull();
   });
 
+  // Regression: `Keyword::Replicate` holds a bare `AbilityCost`, whose serde is
+  // internally tagged — `{ type: "Mana", cost: {...} }` / `{ type:
+  // "TapCreatures", ... }`. The sibling cost enums (FlashbackCost, BlitzCost,
+  // BestowCost) are adjacently tagged and carry their payload under `data`
+  // instead, so the formatter has to read BOTH keys. Reading only `data` made
+  // every replicate cost render as `undefined`.
+  it("formats a bare AbilityCost payload (internally-tagged serde)", () => {
+    expect(
+      getKeywordDetail({ Replicate: { type: "Mana", cost: { type: "Cost", shards: ["Red"], generic: 2 } } }),
+    ).toBe("{2}{R}");
+    // A non-mana replicate cost (Exterminate!) has no client-side detail text:
+    // `formatKnownCost` deliberately has no `TapCreatures` arm, because rendering
+    // it would mean the frontend parsing the cost AST — the engine owns cost
+    // text. `null` renders the keyword with no detail, not a broken label. The
+    // mana arm above is the regression this test exists for.
+    expect(
+      getKeywordDetail({
+        Replicate: {
+          type: "TapCreatures",
+          requirement: { requirement: "count", count: 1 },
+          filter: { type: "Typed", type_filters: [{ Subtype: "Dalek" }], controller: "You", properties: [] },
+        },
+      }),
+    ).toBeNull();
+  });
+
   it("formats ManaCost params (internally-tagged serde)", () => {
     expect(getKeywordDetail({ Equip: { type: "Cost", shards: ["White"], generic: 2 } })).toBe("{2}{W}");
     expect(getKeywordDetail({ Kicker: { type: "Cost", shards: [], generic: 4 } })).toBe("{4}");

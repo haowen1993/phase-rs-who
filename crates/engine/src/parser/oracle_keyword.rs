@@ -840,6 +840,37 @@ fn split_outside_braces(text: &str) -> Vec<&str> {
 /// letting the runtime split (see `split_flashback_cost` in casting.rs) extract the
 /// mana sub-cost from a Composite for normal mana payment while routing the residual
 /// non-mana sub-costs through `pay_additional_cost`.
+/// CR 702.56a: Replicate's em-dash cost form — "Replicate—Tap an untapped Dalek
+/// you control" (Exterminate!).
+///
+/// The em-dash is load-bearing: Wizards reserves it for the NON-mana (or
+/// compound) form, and prints the ordinary form as "Replicate {U}" with a space
+/// — because a dash there would be ambiguous with a negative mana value. So a
+/// dash means the cost cannot be read as a bare mana cost and must go through
+/// `parse_oracle_cost`, exactly like `flashback—` and `bestow—` above.
+///
+/// Returns `None` when the cost text does not parse, so the line falls through
+/// to the ordinary parser and becomes an honest `Effect::Unimplemented` rather
+/// than a Replicate whose cost is a placeholder.
+fn parse_replicate_dash_cost(cost_text: &str) -> Option<AbilityCost> {
+    let trimmed = cost_text.trim().trim_end_matches('.').trim_end_matches(')');
+    // Strip reminder text in parentheses: take everything before the first " (".
+    let clean = opt(take_until::<_, _, OracleError<'_>>(" ("))
+        .parse(trimmed)
+        .map(|(_, before)| before.unwrap_or(trimmed))
+        .unwrap_or(trimmed)
+        .trim();
+    if clean.is_empty() {
+        return None;
+    }
+    match super::oracle_cost::parse_oracle_cost(clean) {
+        // `parse_oracle_cost` answers `Unimplemented` for text it cannot read;
+        // that is a parse failure here, not a cost.
+        AbilityCost::Unimplemented { .. } => None,
+        cost => Some(cost),
+    }
+}
+
 fn parse_flashback_cost(cost_text: &str) -> Option<FlashbackCost> {
     let trimmed = cost_text.trim().trim_end_matches('.').trim_end_matches(')');
     // Strip reminder text in parentheses: take everything before the first " (".
@@ -1559,6 +1590,13 @@ pub(crate) fn parse_keyword_line_core(text: &str) -> Option<(Keyword, &str)> {
                     return Some((parsed, mana_cost_remainder(cost_str)));
                 }
             }
+        }
+    }
+
+    // CR 702.56a: Replicate with a non-mana cost uses the em-dash separator.
+    if let Ok((rest, _)) = tag::<_, _, OracleError<'_>>("replicate\u{2014}").parse(text) {
+        if let Some(rep_cost) = parse_replicate_dash_cost(rest) {
+            return Some((Keyword::Replicate(rep_cost), ""));
         }
     }
 
@@ -3873,6 +3911,51 @@ mod tests {
         let kw = parse_granted_keyword_fragment("cycling {2}").unwrap();
         let Keyword::Cycling(CyclingCost::Mana(_)) = kw else {
             panic!("expected Cycling Mana variant, got {kw:?}");
+        };
+    }
+
+    /// CR 702.56a: Replicate's em-dash cost form (Exterminate!).
+    ///
+    /// The cost must arrive as an `AbilityCost::TapCreatures` — a cost the
+    /// payment authority can actually resolve — rather than falling through to
+    /// the `EffectCost` parser, whose `SetTapState` shape
+    /// `supports_effect_cost_payment` rejects at runtime. The reminder text in
+    /// parentheses and the sentence period must both be stripped first.
+    #[test]
+    fn parse_replicate_dash_cost_reads_a_tap_cost_and_strips_reminder_text() {
+        assert_eq!(
+            parse_replicate_dash_cost(
+                "Tap an untapped Dalek you control. (When you cast this spell, copy it for \
+                 each time you paid its replicate cost. You may choose new targets for the \
+                 copies.)"
+            ),
+            Some(AbilityCost::TapCreatures {
+                requirement: crate::types::ability::TapCreaturesRequirement::count(1),
+                filter: TargetFilter::Typed(
+                    crate::types::ability::TypedFilter::new(
+                        crate::types::ability::TypeFilter::Subtype("Dalek".into())
+                    )
+                    .controller(ControllerRef::You)
+                ),
+            })
+        );
+    }
+
+    /// A cost the engine cannot express must not become a Replicate with a
+    /// placeholder cost — the line has to fall through and be reported as
+    /// unimplemented instead.
+    #[test]
+    fn parse_replicate_dash_cost_rejects_unparseable_text() {
+        assert_eq!(parse_replicate_dash_cost("frobnicate the whatsit"), None);
+        assert_eq!(parse_replicate_dash_cost("   "), None);
+    }
+
+    /// The ordinary form stays mana, and must not be diverted by the em-dash arm.
+    #[test]
+    fn parse_granted_keyword_fragment_replicate_mana_is_unaffected() {
+        let kw = parse_granted_keyword_fragment("Replicate {1}{U}").unwrap();
+        let Keyword::Replicate(AbilityCost::Mana { .. }) = kw else {
+            panic!("expected a mana replicate cost, got {kw:?}");
         };
     }
 

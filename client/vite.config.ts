@@ -212,6 +212,16 @@ function dataFileDefines(mode: string, buildHash: string): Record<string, string
       process.env.SCRYFALL_IMAGES_LOCALE_URL_TEMPLATE ||
         (base ? `${base}/scryfall-images.v2.{lng}.json` : "/scryfall-images.v2.{lng}.json"),
     ),
+    // Measured per-printing art availability for a DERIVED locale, which has no
+    // Scryfall-side localized printing to map to. Same lifecycle as the map
+    // above; a 404 simply leaves the locale with no preference, which is the
+    // pre-existing behaviour.
+    __SCRYFALL_IMAGES_AVAILABILITY_URL_TEMPLATE__: JSON.stringify(
+      process.env.SCRYFALL_IMAGES_AVAILABILITY_URL_TEMPLATE ||
+        (base
+          ? `${base}/scryfall-images.{lng}-available.json`
+          : "/scryfall-images.{lng}-available.json"),
+    ),
   };
   for (const filename of manifest) {
     // "card-names.json" → "__CARD_NAMES_URL__"; "card-data.de.json" →

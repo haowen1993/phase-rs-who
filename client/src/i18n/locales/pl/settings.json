@@ -29,6 +29,8 @@
     },
     "title": "Rozgrywka",
     "language": "Język",
+    "artLanguage": "Język grafik kart",
+    "artLanguageAuto": "Tak jak interfejs",
     "cardSize": "Rozmiar kart",
     "commandZone": "Strefa dowodzenia",
     "autoPass": "Auto-Pass",

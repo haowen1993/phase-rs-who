@@ -29,6 +29,8 @@
     },
     "title": "ゲームプレイ",
     "language": "言語",
+    "artLanguage": "カード画像の言語",
+    "artLanguageAuto": "インターフェースに合わせる",
     "cardSize": "カードサイズ",
     "commandZone": "統率領域",
     "autoPass": "自動パス",

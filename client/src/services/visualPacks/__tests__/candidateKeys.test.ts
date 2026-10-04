@@ -88,3 +88,44 @@ describe("semanticCardCandidateGroups", () => {
     expect(() => encodeCandidateKey(kind, tuple)).toThrow();
   });
 });
+
+/**
+ * The locale slot in a `localized_printing` / `localized_alias` key is validated
+ * by SHAPE, not by an enumeration of the locales the app happens to ship a
+ * sidecar for today.
+ *
+ * An enumerated list made every new art language fail here: `cardCandidateGroups`
+ * validates its candidate keys eagerly, so an unlisted code threw out of the
+ * group builder, where the caller's `try`/`catch` turned it into "this language
+ * has no local candidates" — silently disabling localized-pack lookups for it
+ * rather than failing visibly. These cases pin the shape rule so a future
+ * re-narrowing is caught here instead of in the field.
+ */
+describe("candidate key locale domain", () => {
+  const UUID = "0dbac7ce-a6fa-466e-b6ba-173cf2dec98e";
+
+  it.each([
+    ["an established mapped locale", "de"],
+    ["a locale with a UI but no art", "pl"],
+    ["a derived art locale with no UI", "zhs"],
+  ])("accepts %s", (_label, locale) => {
+    const key = encodeCandidateKey("localized_printing", [
+      locale, UUID, 0, "full_card", "normal",
+    ]);
+    expect(decodeCandidateKey(key)).toEqual([
+      "localized_printing", [locale, UUID, 0, "full_card", "normal"],
+    ]);
+  });
+
+  it.each([
+    ["too short", "z"],
+    ["too long", "zhxyn"],
+    ["upper case", "ZH"],
+    ["with a region subtag", "zh-hans"],
+    ["empty", ""],
+  ])("still rejects a locale that is %s", (_label, locale) => {
+    expect(() => encodeCandidateKey("localized_printing", [
+      locale, UUID, 0, "full_card", "normal",
+    ])).toThrow();
+  });
+});

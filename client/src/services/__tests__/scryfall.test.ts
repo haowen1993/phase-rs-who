@@ -12,6 +12,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { insertBeforeTerminalFallback } from "../../hooks/useCardImage.ts";
+import { resolveArtLanguage } from "../cardArtLocale.ts";
+import { assetKey, catalogRoot, packId } from "../visualPacks/types.ts";
 
 import type { PrintingEntry } from "../scryfall.ts";
 
@@ -2005,5 +2008,272 @@ describe("localized card art", () => {
     // Reach guard: the deduped map is the one that actually got installed, so
     // the identity assertions above are not describing a map nobody uses.
     expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal")).toBe(cardUrl(DE_ID));
+  });
+});
+
+/**
+ * The derived branch of the same funnel: locales whose art is addressed by the
+ * English printing id rather than named by a sidecar map.
+ *
+ * Simplified Chinese is the only such locale, because Scryfall has no
+ * Simplified-Chinese printings at all — the art lives on a community host that
+ * mirrors Scryfall's path layout, so `zhs` needs no generated map and no network
+ * request to become ready.
+ */
+describe("derived card art locales", () => {
+  const EN_ID = "0dbac7ce-a6fa-466e-b6ba-173cf2dec98e";
+  const CARD_BACK = "https://backs.scryfall.io/normal/0/a/0aeebaf5-8c7d-4636-9e82-8c27447861f7.jpg";
+  const PLACEHOLDER = "https://errors.scryfall.com/soon.jpg";
+
+  const scryfallUrl = (id: string, size = "normal", face = "front", query = "") =>
+    `https://cards.scryfall.io/${size}/${face}/${id[0]}/${id[1]}/${id}.jpg${query}`;
+  const derivedUrl = (id: string, prefix: "zhs" | "sf", size = "normal", face = "front") =>
+    `https://images.mtgch.com/${prefix}/${size}/${face}/${id[0]}/${id[1]}/${id}.webp`;
+
+  const printing = (id: string, query = ""): PrintingEntry => ({
+    id,
+    set: "mid",
+    set_name: "Innistrad: Midnight Hunt",
+    collector_number: "7",
+    released_at: "2021-09-24",
+    border_color: "black",
+    frame_effects: [],
+    full_art: false,
+    faces: [
+      {
+        small: scryfallUrl(id, "small", "front", query),
+        normal: scryfallUrl(id, "normal", "front", query),
+        art_crop: scryfallUrl(id, "art_crop"),
+      },
+      {
+        small: scryfallUrl(id, "small", "back", query),
+        normal: scryfallUrl(id, "normal", "back", query),
+        art_crop: scryfallUrl(id, "art_crop", "back"),
+      },
+    ],
+  });
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("re-addresses the English printing onto the Chinese host, keeping the printing", async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("zhs");
+
+    const resolved = mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal");
+
+    expect(resolved).toBe(derivedUrl(EN_ID, "zhs"));
+    // Non-vacuity: an untouched base URL would be the Scryfall original.
+    expect(resolved).not.toBe(scryfallUrl(EN_ID));
+    // The shard directories are the printing id's own prefix, not a guess.
+    expect(resolved).toContain(`/${EN_ID[0]}/${EN_ID[1]}/`);
+  });
+
+  it("keeps the printing id, so art follows the printing the player chose", async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("zhs");
+
+    // Two printings of one card must not collapse onto one image.
+    const other = "345a1cf0-e4de-42a9-9c72-ed16826b9067";
+    expect(mod.resolvePrintingImageUrl(printing(other), 0, "normal")).toBe(derivedUrl(other, "zhs"));
+  });
+
+  it("derives every face size that exists on that host", async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("zhs");
+
+    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "small")).toBe(derivedUrl(EN_ID, "zhs", "small"));
+    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal")).toBe(derivedUrl(EN_ID, "zhs", "normal"));
+    // `large` collapses onto `normal`, exactly as it does on Scryfall — that is
+    // the app-wide 488px ceiling, not a Chinese-specific rule, so this locale
+    // must not quietly double its own bitmap budget.
+    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "large")).toBe(derivedUrl(EN_ID, "zhs", "normal"));
+  });
+
+  it("localizes the back face with the same printing id", async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("zhs");
+
+    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 1, "normal")).toBe(derivedUrl(EN_ID, "zhs", "normal", "back"));
+  });
+
+  it("leaves art crops on Scryfall", async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("zhs");
+
+    // An art crop is the illustration alone and carries no language; the stored
+    // crop URL is also the one the browser already cached, so moving it to a
+    // second host would re-download the identical picture to gain nothing.
+    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "art_crop")).toBe(scryfallUrl(EN_ID, "art_crop"));
+  });
+
+  it("drops the English cache-buster, which names no object on that host", async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("zhs");
+
+    expect(mod.resolvePrintingImageUrl(printing(EN_ID, "?1783921885"), 0, "normal"))
+      .toBe(derivedUrl(EN_ID, "zhs"));
+  });
+
+  it("never rewrites the card back or the art placeholder", async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("zhs");
+
+    // Both are non-derivable shapes, and the placeholder MUST come back
+    // byte-identical or `isPlaceholderImageUrl` stops gating art fallback.
+    expect(mod.deriveImageUrl(CARD_BACK, "normal")).toBe(CARD_BACK);
+    expect(mod.derivedArtFallbackUrl(CARD_BACK)).toBeUndefined();
+    expect(mod.derivedArtFallbackUrl(PLACEHOLDER)).toBeUndefined();
+  });
+
+  it("reports readiness without any network request", async () => {
+    const mod = await loadScryfallModule();
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock;
+
+    expect(mod.isLocaleArtReady("zhs")).toBe(false);
+    const map = await mod.loadLocaleArt("zhs");
+
+    // There is no `scryfall-images.v2.zhs.json`; a fetch here would 404 on every
+    // load. The empty map is the truthful value — the locale, not the map, is
+    // what the derived branch reads.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(map.size).toBe(0);
+    expect(mod.isLocaleArtReady("zhs")).toBe(true);
+  });
+
+  it("replaces a previously installed mapped locale", async () => {
+    const mod = await loadScryfallModule();
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 404 }),
+    );
+    await mod.loadLocaleArt("de");
+    expect(mod.isLocaleArtReady("de")).toBe(true);
+
+    await mod.loadLocaleArt("zhs");
+
+    // Switching locale must switch the rewrite, not layer on top of it.
+    expect(mod.isLocaleArtReady("de")).toBe(false);
+    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal")).toBe(derivedUrl(EN_ID, "zhs"));
+  });
+
+  it("exposes the English rung of the same host as the fallback", async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("zhs");
+
+    // The second rung is what turns a 404 (that printing has no Chinese image)
+    // into English art instead of a text placeholder. Measured: roughly a third
+    // to three quarters of printings have one, and the newest sets have none.
+    //
+    // Takes the base Scryfall URL — the same input `localizeImageUrl` takes — so
+    // a caller holds one URL and asks for the rung that replaces it on failure.
+    expect(mod.derivedArtFallbackUrl(scryfallUrl(EN_ID))).toBe(derivedUrl(EN_ID, "sf"));
+    // And the two rungs are the two sides of the same rewrite, not one URL twice.
+    expect(mod.derivedArtFallbackUrl(scryfallUrl(EN_ID)))
+      .not.toBe(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal"));
+  });
+
+  it("offers no fallback rung for mapped locales or art crops", async () => {
+    const mod = await loadScryfallModule();
+    global.fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 404 }));
+    await mod.loadLocaleArt("de");
+    // A mapped locale already resolves a usable per-printing URL from its
+    // sidecar, so it takes no ladder; art crops are not rewritten at all.
+    expect(mod.derivedArtFallbackUrl(scryfallUrl(EN_ID))).toBeUndefined();
+
+    await mod.loadLocaleArt("en");
+    expect(mod.derivedArtFallbackUrl(scryfallUrl(EN_ID))).toBeUndefined();
+
+    await mod.loadLocaleArt("zhs");
+    expect(mod.derivedArtFallbackUrl(scryfallUrl(EN_ID, "art_crop"))).toBeUndefined();
+  });
+
+  it("is a no-op for English", async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("en");
+
+    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal")).toBe(scryfallUrl(EN_ID));
+    expect(mod.isLocaleArtReady("en")).toBe(true);
+  });
+
+  it("resolves the art locale from the UI language and the preference", () => {
+    // "auto" is the pre-existing behaviour: art follows the UI language.
+    expect(resolveArtLanguage("de", "auto")).toBe("de");
+    expect(resolveArtLanguage("en", "auto")).toBe("en");
+    expect(resolveArtLanguage("de", undefined)).toBe("de");
+    // An explicit choice is independent of the UI language — the whole point.
+    expect(resolveArtLanguage("en", "zhs")).toBe("zhs");
+    expect(resolveArtLanguage("ja", "zhs")).toBe("zhs");
+    // A stale or hand-edited persisted value degrades to "auto", never to a
+    // locale no loader can satisfy.
+    expect(resolveArtLanguage("fr", "klingon")).toBe("fr");
+    expect(resolveArtLanguage("fr", "")).toBe("fr");
+  });
+});
+
+/**
+ * Positional invariant of the derived-locale ladder.
+ *
+ * `advanceFailedSource` walks a ladder in array order and stops at the first
+ * `{kind: "fallback", src: null}` it reaches, and `VisualPackRepository` always
+ * closes a ladder with that sentinel. So an English rung appended *after* the
+ * sentinel is unreachable dead code — the walk terminates one step early and a
+ * printing with no Chinese art renders the text placeholder instead of the
+ * English art sitting in the array. These cases pin the splice position, which a
+ * plain "the source is present" assertion would not catch.
+ */
+describe("derived art ladder ordering", () => {
+  const remote = (src: string) => ({ kind: "remote" as const, src });
+  const terminal = { kind: "fallback" as const, src: null };
+
+  it("places the extra rung directly before the terminal fallback", () => {
+    const ladder = insertBeforeTerminalFallback(
+      [remote("zhs.webp"), terminal],
+      [remote("sf.webp")],
+    );
+
+    expect(ladder.map((source) => source.src)).toEqual(["zhs.webp", "sf.webp", null]);
+    // The negative half: appending would also "contain" the English rung.
+    expect(ladder[ladder.length - 1]).toEqual(terminal);
+  });
+
+  it("keeps an installed pack ahead of both remote rungs", () => {
+    // The installed arm's identity fields are branded, so they go through the
+    // same constructors production uses rather than being cast.
+    const ladder = insertBeforeTerminalFallback(
+      [
+        {
+          kind: "installed" as const,
+          src: "pack.jpg",
+          assetKey: assetKey("asset:v1:canonical_card:AA"),
+          packId: packId("core"),
+          catalogRoot: catalogRoot("a".repeat(64)),
+        },
+        remote("zhs.webp"),
+        terminal,
+      ],
+      [remote("sf.webp")],
+    );
+
+    // An installed pack is an explicit user choice with bytes on disk, so it
+    // stays first; the derived rung only ever displaces the terminal sentinel.
+    expect(ladder.map((source) => source.src)).toEqual(["pack.jpg", "zhs.webp", "sf.webp", null]);
+  });
+
+  it("returns the same array when there is nothing to insert", () => {
+    const ladder = [remote("cards.scryfall.io/normal/front/a/a/card.jpg"), terminal];
+
+    // Identity, not equality: every mapped locale takes this path on every card,
+    // so it must not allocate a fresh ladder.
+    expect(insertBeforeTerminalFallback(ladder, [])).toBe(ladder);
+  });
+
+  it("appends when a ladder has no terminal fallback", () => {
+    // Installed-only ladders can reach the render path without a sentinel; the
+    // walk then ends by exhausting the array, so appending is correct there.
+    const ladder = insertBeforeTerminalFallback([remote("zhs.webp")], [remote("sf.webp")]);
+
+    expect(ladder.map((source) => source.src)).toEqual(["zhs.webp", "sf.webp"]);
   });
 });

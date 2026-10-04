@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   CARD_BACK_URL,
+  assetFallbackSources,
+  derivedArtFallbackUrl,
   fetchCardImageAsset,
   fetchCardImageAssetByOracleId,
   fetchTokenImageAssetByRef,
@@ -20,6 +22,7 @@ import {
 } from "../services/scryfall.ts";
 import type { ImageSize, PrintingEntry, TokenSearchFilters } from "../services/scryfall.ts";
 import type { CardImageAsset } from "../services/scryfall.ts";
+import { resolveArtLanguage } from "../services/cardArtLocale.ts";
 import { applyChain } from "../services/artSelection.ts";
 import {
   decodeTokenFilterKeywords,
@@ -202,9 +205,75 @@ function remoteAsset(
   size: ImageSize,
   semantic: CardImageAsset["semantic"],
   isRotated: boolean,
+  fallbackSrc?: string,
 ): CardImageAsset {
   const rungs = remoteRungs(src, size);
-  return { src, isRotated, rungs, source: { kind: "remote", src, rungs }, semantic };
+  return { src, isRotated, rungs, source: { kind: "remote", src, rungs }, fallbackSrc, semantic };
+}
+
+/**
+ * Insert the derived art locale's English rung into an already-resolved ladder,
+ * directly after the URL it backs up.
+ *
+ * The second rung is what keeps a missing Chinese printing from becoming a text
+ * placeholder. `CardImage` funnels every load failure into `onError` →
+ * `advanceFailedSource`, which walks the ladder a rung at a time; without an
+ * English rung the walk reaches `{kind: "fallback", src: null}` and the card
+ * loses its art entirely, even though the same art exists one URL away.
+ *
+ * Inserted *before* the terminal `{kind: "fallback", src: null}` sentinel, not
+ * appended — the ladder is walked in array order, so a rung placed after the
+ * sentinel is never reached. That sentinel is `VisualPackRepository`'s, and it
+ * always closes the array, so the extra rung is spliced in ahead of it; an
+ * installed pack still wins because it precedes both.
+ *
+ * With no derived rung (every mapped locale) `sources` is returned as the very
+ * same array, leaving the existing six languages' ladder byte-identical.
+ */
+function withAssetSources(
+  sources: CardImageSource[],
+  asset: CardImageAsset,
+): CardImageSource[] {
+  return insertBeforeTerminalFallback(
+    sources,
+    assetFallbackSources(asset.src, asset.fallbackSrc).filter(
+      (candidate) => !sources.some((existing) => existing.src === candidate.src),
+    ),
+  );
+}
+
+/**
+ * Splice `extra` rungs in directly ahead of the terminal `{kind: "fallback",
+ * src: null}` sentinel that `VisualPackRepository` always closes a ladder with.
+ *
+ * Exported for its own test because the invariant is positional and invisible in
+ * a snapshot: `advanceFailedSource` walks the array in order and stops at the
+ * first `{src: null}` it reaches, so an extra rung appended *after* the sentinel
+ * is dead code that also looks correct at the call site. Returning the input
+ * array unchanged when there is nothing to insert keeps the no-derived-locale
+ * path allocation-free.
+ */
+export function insertBeforeTerminalFallback(
+  sources: CardImageSource[],
+  extra: CardImageSource[],
+): CardImageSource[] {
+  if (extra.length === 0) return sources;
+  const terminal = sources.findIndex((source) => source.kind === "fallback");
+  if (terminal < 0) return [...sources, ...extra];
+  return [...sources.slice(0, terminal), ...extra, ...sources.slice(terminal)];
+}
+
+/**
+ * Attach the active derived art locale's English rung, if it has one.
+ *
+ * Applied at the one place an asset is first built rather than at each publish
+ * site, so every route into the ladder — the art-chain override, the printing
+ * fallback, the cached remote acquisition — carries the same second rung.
+ */
+function withArtFallback(asset: CardImageAsset): CardImageAsset {
+  const fallbackSrc = derivedArtFallbackUrl(asset.src);
+  if (!fallbackSrc || fallbackSrc === asset.src) return asset;
+  return { ...asset, fallbackSrc };
 }
 
 function metadataRepositoryGroups(
@@ -461,6 +530,8 @@ function localeArtCacheKey(lang: string): string {
  */
 export function useLocaleArt(): string {
   const language = usePreferencesStore((s) => s.language);
+  const artLanguagePreference = usePreferencesStore((s) => s.artLanguage);
+  const artLanguage = resolveArtLanguage(language, artLanguagePreference);
   const [, setLocaleArtTick] = useState(0);
 
   useEffect(() => {
@@ -470,10 +541,10 @@ export function useLocaleArt(): string {
   }, []);
 
   useEffect(() => {
-    loadLocaleArtInBackground(language);
-  }, [language]);
+    loadLocaleArtInBackground(artLanguage);
+  }, [artLanguage]);
 
-  return localeArtCacheKey(language);
+  return localeArtCacheKey(artLanguage);
 }
 
 function resolveStrategyInBackground(oracleId: string, chain: ArtChainEntry[]): void {
@@ -730,7 +801,7 @@ async function acquireCachedImageSrc(
           ? decodeTokenFilterKeywords(filterKeywords)
           : undefined,
       });
-      asset = remoteAsset(
+      asset = withArtFallback(remoteAsset(
         remoteSrc,
         size,
         {
@@ -739,7 +810,7 @@ async function acquireCachedImageSrc(
           alias: cardName.toLowerCase().normalize("NFC"),
         },
         false,
-      );
+      ));
     } else if (oracleId) {
       asset = await fetchCardImageAssetByOracleId(oracleId, faceName, size);
     } else {
@@ -753,10 +824,10 @@ async function acquireCachedImageSrc(
         && printing.collector_number === sourcePrinting.collectorNumber);
       const sourceUrl = source && resolvePrintingImageUrl(source, asset.semantic.faceIndex, size);
       if (sourceUrl) {
-        asset = remoteAsset(sourceUrl, size, {
+        asset = withArtFallback(remoteAsset(sourceUrl, size, {
           ...asset.semantic,
           englishPrintingId: source.id.toLowerCase(),
-        }, asset.isRotated);
+        }, asset.isRotated));
       }
     }
     entry.asset = asset;
@@ -833,11 +904,15 @@ export function useCardImage(
   const artOverrides = usePreferencesStore((s) => s.artOverrides);
   const artChain = usePreferencesStore((s) => s.artChain);
   const effectiveOffline = useEffectiveOffline();
-  // Card art follows the UI language: the printing the user chose is kept, and
-  // only its image is swapped for the same printing in their language. Cards
-  // with no localized sibling keep their English art.
+  // Card art follows the ART language, which defaults to the UI language but can
+  // be set independently (a player may read the UI in English and still want
+  // Chinese cards). The printing the user chose is kept, and only its image is
+  // swapped for the same printing in that language. Cards with no localized
+  // sibling keep their English art.
   const language = usePreferencesStore((s) => s.language);
-  const artLocaleKey = localeArtCacheKey(language);
+  const artLanguagePreference = usePreferencesStore((s) => s.artLanguage);
+  const artLanguage = resolveArtLanguage(language, artLanguagePreference);
+  const artLocaleKey = localeArtCacheKey(artLanguage);
 
   const [src, setSrc] = useState<string | null>(null);
   const [isRotated, setIsRotated] = useState(false);
@@ -1075,7 +1150,7 @@ export function useCardImage(
         overridePrintingId = source?.id ?? "";
       }
       return overrideUrl
-        ? remoteAsset(
+        ? withArtFallback(remoteAsset(
             overrideUrl,
             size,
             {
@@ -1085,7 +1160,7 @@ export function useCardImage(
               alias: cardName.toLowerCase().normalize("NFC"),
             },
             isCardImageRotatedSync(resolvedOracleId, cardName),
-          )
+          ))
         : null;
     };
 
@@ -1097,7 +1172,7 @@ export function useCardImage(
           continuation.settled = true;
           return;
         }
-        loadLocaleArtInBackground(language);
+        loadLocaleArtInBackground(artLanguage);
         try {
           let imageAsset = selectedRemoteOverride();
           if (!imageAsset) {
@@ -1130,7 +1205,7 @@ export function useCardImage(
               size,
               cardName,
               faceName,
-              language,
+              artLanguage,
               isToken,
               stableTokenImageRef,
             ),
@@ -1140,7 +1215,7 @@ export function useCardImage(
           });
           const viable = result.sources.filter((source) =>
             source.src === null || !failedSources.current.values.has(source.src));
-          publish(viable.length > 0 ? viable : fallback, imageAsset);
+          publish(viable.length > 0 ? withAssetSources(viable, imageAsset) : fallback, imageAsset);
         } catch {
           publish(fallback);
         } finally {
@@ -1153,7 +1228,7 @@ export function useCardImage(
     async function resolveLocal(): Promise<void> {
       const groups = localCandidateGroups(
         size,
-        language,
+        artLanguage,
         cardName,
         faceName,
         resolvedOracleId,
@@ -1200,6 +1275,7 @@ export function useCardImage(
     tokenImageRefKey,
     isToken,
     language,
+    artLanguage,
     oracleId,
     explicitPrintingId,
     effectiveOffline,

@@ -33,7 +33,10 @@ function mockNoRemoteScryfall(resolveFaceIndexSync: (...args: unknown[]) => numb
     isCardImageRotatedSync: vi.fn(() => false),
     isLocaleArtReady: vi.fn(() => true),
     loadLocaleArt: remoteWork,
-    resolveFaceIndexSync,
+    assetFallbackSources: (src: string, fallbackSrc?: string) =>
+      fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+    derivedArtFallbackUrl: vi.fn(() => undefined),
+        resolveFaceIndexSync,
     resolveOracleIdSync: vi.fn(() => null),
     resolvePrintingImageUrl: vi.fn(),
   }));
@@ -110,7 +113,10 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn(() => false),
       isLocaleArtReady: vi.fn(() => true),
       loadLocaleArt: vi.fn(),
-      resolveFaceIndexSync: vi.fn(() => null),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
+            resolveFaceIndexSync: vi.fn(() => null),
       resolveOracleIdSync: vi.fn(() => null),
       resolvePrintingImageUrl: vi.fn((printing) => printing.faces[0].normal),
     }));
@@ -173,7 +179,10 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn(() => false),
       isLocaleArtReady: vi.fn(() => true),
       loadLocaleArt: vi.fn(),
-      resolveFaceIndexSync: vi.fn(() => null),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
+            resolveFaceIndexSync: vi.fn(() => null),
       resolveOracleIdSync: vi.fn(() => null),
       resolvePrintingImageUrl: vi.fn((printing) => printing.faces[0].normal),
     }));
@@ -428,6 +437,9 @@ describe("useCardImage", () => {
       // localization.
       isLocaleArtReady: vi.fn().mockReturnValue(true),
       loadLocaleArt: vi.fn().mockResolvedValue(new Map()),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
       resolveFaceIndexSync: vi.fn().mockReturnValue(null),
       resolveOracleIdSync: vi.fn().mockReturnValue(null),
       resolvePrintingImageUrl: vi.fn(),
@@ -487,7 +499,10 @@ describe("useCardImage", () => {
       // reported ready so the background loader never runs here.
       isLocaleArtReady: vi.fn().mockReturnValue(true),
       loadLocaleArt: vi.fn().mockResolvedValue(new Map()),
-      pickOldestPrinting: vi.fn(),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
+            pickOldestPrinting: vi.fn(),
       resolveFaceIndexSync: vi.fn().mockReturnValue(null),
       resolveOracleIdSync: vi.fn().mockReturnValue(null),
       resolvePrintingImageUrl: vi.fn(),
@@ -586,6 +601,9 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn().mockReturnValue(false),
       isLocaleArtReady: vi.fn().mockReturnValue(true),
       loadLocaleArt: vi.fn().mockResolvedValue(new Map()),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
       resolveFaceIndexSync: vi.fn().mockReturnValue(null),
       resolveOracleIdSync: vi.fn().mockReturnValue(null),
       resolvePrintingImageUrl: vi.fn(),
@@ -894,7 +912,10 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn(() => false),
       isLocaleArtReady: vi.fn(() => true),
       loadLocaleArt: remoteWork,
-      resolveFaceIndexSync: vi.fn(() => null),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
+            resolveFaceIndexSync: vi.fn(() => null),
       resolveOracleIdSync: vi.fn(() => null),
       resolvePrintingImageUrl: vi.fn(),
     }));
@@ -1217,7 +1238,10 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn(() => false),
       isLocaleArtReady: vi.fn(() => true),
       loadLocaleArt,
-      resolveFaceIndexSync: vi.fn(() => null),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
+            resolveFaceIndexSync: vi.fn(() => null),
       resolveOracleIdSync: vi.fn(() => null),
       resolvePrintingImageUrl: vi.fn(),
     }));
@@ -1300,7 +1324,10 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn(() => false),
       isLocaleArtReady: vi.fn(() => true),
       loadLocaleArt: vi.fn(),
-      resolveFaceIndexSync: vi.fn(() => null),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
+            resolveFaceIndexSync: vi.fn(() => null),
       resolveOracleIdSync: vi.fn(() => null),
       resolvePrintingImageUrl: vi.fn(),
     }));
@@ -1378,7 +1405,10 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn(() => false),
       isLocaleArtReady: vi.fn(() => true),
       loadLocaleArt: vi.fn(),
-      resolveFaceIndexSync: vi.fn(() => null),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
+            resolveFaceIndexSync: vi.fn(() => null),
       resolveOracleIdSync: vi.fn(() => null),
       resolvePrintingImageUrl: vi.fn(),
     }));
@@ -1453,7 +1483,10 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn(() => false),
       isLocaleArtReady: vi.fn(() => true),
       loadLocaleArt: vi.fn(),
-      resolveFaceIndexSync: vi.fn(() => derivedFaceIndex),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
+            resolveFaceIndexSync: vi.fn(() => derivedFaceIndex),
       resolveOracleIdSync: vi.fn(() => derivedOracleId),
       resolvePrintingImageUrl: vi.fn(),
     }));
@@ -1527,7 +1560,10 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn(() => false),
       isLocaleArtReady: vi.fn(() => true),
       loadLocaleArt: vi.fn(),
-      resolveFaceIndexSync: vi.fn(() => null),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
+            resolveFaceIndexSync: vi.fn(() => null),
       resolveOracleIdSync: vi.fn(() => null),
       resolvePrintingImageUrl: vi.fn(),
     }));
@@ -1586,7 +1622,10 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn(() => false),
       isLocaleArtReady: vi.fn(() => true),
       loadLocaleArt: vi.fn(),
-      resolveFaceIndexSync: vi.fn(() => null),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
+            resolveFaceIndexSync: vi.fn(() => null),
       resolveOracleIdSync: vi.fn(() => null),
       resolvePrintingImageUrl: vi.fn(),
     }));
@@ -1857,6 +1896,9 @@ describe("useCardImage", () => {
       isCardImageRotatedSync: vi.fn().mockReturnValue(false),
       isLocaleArtReady: vi.fn().mockReturnValue(true),
       loadLocaleArt: vi.fn().mockResolvedValue(new Map()),
+      assetFallbackSources: (src: string, fallbackSrc?: string) =>
+        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
+      derivedArtFallbackUrl: vi.fn(() => undefined),
       resolveFaceIndexSync: vi.fn().mockReturnValue(null),
       resolveOracleIdSync: vi.fn().mockReturnValue(null),
       resolvePrintingImageUrl: vi.fn(),

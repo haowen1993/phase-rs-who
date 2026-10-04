@@ -25,6 +25,7 @@ import type { AIDifficulty } from "../constants/ai";
 import { DEFAULT_AI_DIFFICULTY } from "../constants/ai";
 import type { DeckArchetype } from "../services/engineRuntime";
 import { detectInitialLanguage, normalizeSupportedLng, type SupportedLng } from "../i18n/resources";
+import { isArtLanguage, type ArtLanguage } from "../services/cardArtLocale.ts";
 
 /** Literal sentinel for "any deck" in AI deck selection. Mirrors `DeckChoice::Random`
  *  naming so the preference value is self-describing without a nullable field. */
@@ -57,6 +58,36 @@ export interface CardArtOverride {
 }
 
 export type CardSizePreference = "small" | "medium" | "large";
+/**
+ * Which language the card ART is rendered in, independently of the UI language.
+ *
+ * The two are separate because the sets differ in both directions: Simplified
+ * Chinese art exists (`zhs`, sourced from a community CDN because Scryfall has no
+ * Simplified-Chinese printings at all) while a Simplified-Chinese UI does not,
+ * and Polish ships a UI with no localized art whatsoever. Coupling them would
+ * force either a full Chinese translation catalog or no Chinese cards.
+ *
+ * `"auto"` is the default and means "follow the UI language", which is exactly
+ * the behaviour the app had before this preference existed — so an existing
+ * player's install is unchanged.
+ */
+export type ArtLanguagePreference = "auto" | ArtLanguage;
+
+/**
+ * Reduce an untrusted (persisted or user-supplied) value to a legal art-language
+ * preference. Anything unrecognized becomes `"auto"` — the pre-existing
+ * "follow the UI" behaviour — so a stale or hand-edited blob can never select an
+ * art locale the loaders cannot satisfy.
+ *
+ * No `ArtLanguage`-valued fallback from the current state is needed here: unlike
+ * `language`, every legal value is self-contained and none is a superset of the
+ * others, so a rejected value loses no information.
+ */
+export function normalizeArtLanguage(value: unknown): ArtLanguagePreference {
+  if (value === "auto") return "auto";
+  return isArtLanguage(value) ? value : "auto";
+}
+
 /** How the hover card-preview behaves on desktop.
  *  "follow" = the preview tracks the cursor (prior fixed behavior, default).
  *  "side"   = the preview docks to the screen edge so it never covers the board.
@@ -276,6 +307,7 @@ const LEGACY_COMBAT_PACING_MULTIPLIERS: Record<string, number> = {
 function buildDefaultPreferences(): PreferencesState {
   return {
     language: detectInitialLanguage(),
+    artLanguage: "auto",
     cardSize: "medium",
     hudLayout: "inline",
     followActiveOpponent: true,
@@ -343,6 +375,9 @@ interface PreferencesState {
    *  single source of truth; `i18n/index.ts` mirrors changes). Closed union — not
    *  the open `(string & {})` pattern, since the supported set is fixed. */
   language: SupportedLng;
+  /** Card-art language, or `"auto"` to follow `language`. Resolution lives in
+   *  `resolveArtLanguage` so the store field stays a plain preference. */
+  artLanguage: ArtLanguagePreference;
   cardSize: CardSizePreference;
   hudLayout: HudLayout;
   followActiveOpponent: boolean;
@@ -457,6 +492,7 @@ interface PreferencesState {
 
 interface PreferencesActions {
   setLanguage: (lng: SupportedLng) => void;
+  setArtLanguage: (lng: ArtLanguagePreference) => void;
   setCardSize: (size: CardSizePreference) => void;
   setHudLayout: (layout: HudLayout) => void;
   setFollowActiveOpponent: (enabled: boolean) => void;
@@ -604,6 +640,9 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
       // Store owns the language; i18n/index.ts subscribes and mirrors it into i18next.
       setLanguage: (lng) =>
         set((state) => ({ language: normalizeSupportedLng(lng, state.language) })),
+      // Card art only — deliberately does NOT touch `language`, so a player can
+      // read the UI in English and still play with Chinese cards.
+      setArtLanguage: (lng) => set({ artLanguage: lng }),
       setCardSize: (size) => set({ cardSize: size }),
       setHudLayout: (layout) => set({ hudLayout: layout }),
       setFollowActiveOpponent: (enabled) => set({ followActiveOpponent: enabled }),
@@ -1138,6 +1177,7 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
         return {
           ...migrated,
           language: normalizeSupportedLng(migrated.language, detectInitialLanguage()),
+          artLanguage: normalizeArtLanguage(migrated.artLanguage),
         };
       },
       // Persisted state is external input. Migration only runs when the schema
@@ -1151,6 +1191,7 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
           ...current,
           ...saved,
           language: normalizeSupportedLng(saved.language, current.language),
+          artLanguage: normalizeArtLanguage(saved.artLanguage),
           logDockSide: saved.logDockSide === "left" || saved.logDockSide === "right"
             ? saved.logDockSide
             : "right",

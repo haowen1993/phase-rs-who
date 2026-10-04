@@ -29,6 +29,8 @@
     },
     "title": "Gameplay",
     "language": "Language",
+    "artLanguage": "Card art language",
+    "artLanguageAuto": "Follow interface",
     "cardSize": "Card Size",
     "commandZone": "Command Zone",
     "autoPass": "Auto-Pass",

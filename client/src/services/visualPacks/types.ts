@@ -17,12 +17,17 @@ export type OperationId = Brand<string, "OperationId">;
 const LOWER_HEX_64 = /^[0-9a-f]{64}$/;
 const LOWER_HEX_32 = /^[0-9a-f]{32}$/;
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
-const PACK_ID = /^(complete|core|curated|deck_library|printing:[a-z0-9]{3,6}|locale:(de|es|fr|it|ja|pt):[a-z0-9]{3,6})$/;
+const PACK_ID = /^(complete|core|curated|deck_library|printing:[a-z0-9]{3,6}|locale:[a-z]{2,3}:[a-z0-9]{3,6})$/;
 const ASSET_KEY = /^asset:v1:(canonical_card|exact_printing|localized_printing|token|card_back|mana_symbol|set_icon):[A-Za-z0-9_-]+$/;
 const CANDIDATE_KEY = /^candidate:v1:(localized_printing|localized_alias|english_printing|english_alias|oracle|oracle_alias|oracle_face|source_printing|name_face|token_reference|token_alias|card_back|mana_symbol|set_icon):([A-Za-z0-9_-]+)$/;
 const CANDIDATE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CANDIDATE_SET = /^[a-z0-9]{3,6}$/;
-const CANDIDATE_LOCALE = /^(de|es|fr|it|ja|pt)$/;
+// Shape, not an enumeration. A locale the catalog holds no rows for simply
+// matches nothing — the key indexes rows that were built with the same code, so
+// an unknown value is inert rather than harmful. Enumerating instead made every
+// new art language (Simplified Chinese `zhs`, already-supported `pl`) throw out
+// of `cardCandidateGroups` and silently disable localized-pack lookups for it.
+const CANDIDATE_LOCALE = /^[a-z]{2,3}$/;
 
 function branded<T extends string>(value: string, pattern: RegExp, name: string): T {
   if (!pattern.test(value)) throw new Error(`invalid ${name}`);

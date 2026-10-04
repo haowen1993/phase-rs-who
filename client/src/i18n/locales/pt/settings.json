@@ -29,6 +29,8 @@
     },
     "title": "Jogabilidade",
     "language": "Idioma",
+    "artLanguage": "Idioma das artes",
+    "artLanguageAuto": "Igual à interface",
     "cardSize": "Tamanho da Carta",
     "commandZone": "Zona de comando",
     "autoPass": "Auto-Pass",

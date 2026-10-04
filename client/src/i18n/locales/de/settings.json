@@ -29,6 +29,8 @@
     },
     "title": "Spielablauf",
     "language": "Sprache",
+    "artLanguage": "Sprache der Kartenbilder",
+    "artLanguageAuto": "Wie die Oberfläche",
     "cardSize": "Kartengröße",
     "commandZone": "Kommandozone",
     "autoPass": "Auto-Pass",

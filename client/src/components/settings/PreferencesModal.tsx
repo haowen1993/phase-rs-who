@@ -36,6 +36,7 @@ import {
 } from "../../animation/types.ts";
 import type {
   ArtChainEntry,
+  ArtLanguagePreference,
   CardPreviewMode,
   CardSizePreference,
   CommandZoneDisplay,
@@ -45,6 +46,7 @@ import type {
   ZoneCollapseMode,
 } from "../../stores/preferencesStore.ts";
 import type { SupportedLng } from "../../i18n/resources.ts";
+import { ART_LANGUAGES, type ArtLanguage } from "../../services/cardArtLocale.ts";
 import { LanguageFlag } from "../ui/LanguageFlag.tsx";
 import { BATTLEFIELDS } from "../board/battlefields.ts";
 import { PLAIN_BACKGROUNDS } from "../board/plainBackgrounds.ts";
@@ -85,6 +87,30 @@ const LANGUAGE_OPTIONS: { value: SupportedLng; label: string }[] = [
   { value: "pl", label: "Polski" },
   { value: "ja", label: "日本語" },
 ];
+
+/**
+ * Card-art options. Wider than `LANGUAGE_OPTIONS` on purpose and sourced from
+ * `ART_LANGUAGES` so the picker and the resolver can never drift: Simplified
+ * Chinese (`zhs`) has art but no UI catalog, and Polish has a UI but no art.
+ *
+ * Labels are autonyms and intentionally NOT translated, matching the language
+ * picker above — a player hunting for their own language must be able to read
+ * the option regardless of which language the UI currently renders in. The
+ * "follow the UI" entry is the one exception: it names a relationship rather
+ * than a language, so it goes through `t()`.
+ */
+const ART_LANGUAGE_VALUES: ArtLanguagePreference[] = ["auto", ...ART_LANGUAGES];
+const ART_LANGUAGE_LABELS: Record<ArtLanguage, string> = {
+  en: "English",
+  es: "Español",
+  fr: "Français",
+  de: "Deutsch",
+  it: "Italiano",
+  pt: "Português",
+  pl: "Polski",
+  ja: "日本語",
+  zhs: "简体中文",
+};
 
 const CARD_SIZES: CardSizePreference[] = ["small", "medium", "large"];
 const COMMAND_ZONE_DISPLAYS: CommandZoneDisplay[] = ["auto", "inline", "compact"];
@@ -182,6 +208,8 @@ export function PreferencesModal({
 
   const language = usePreferencesStore((s) => s.language);
   const setLanguage = usePreferencesStore((s) => s.setLanguage);
+  const artLanguage = usePreferencesStore((s) => s.artLanguage);
+  const setArtLanguage = usePreferencesStore((s) => s.setArtLanguage);
   const cardSize = usePreferencesStore((s) => s.cardSize);
   const commandZoneDisplay = usePreferencesStore((s) => s.commandZoneDisplay);
   const collapseLands = usePreferencesStore((s) => s.collapseLands);
@@ -396,6 +424,17 @@ export function PreferencesModal({
                         );
                       })}
                     </div>
+                  </SettingGroup>
+
+                  <SettingGroup label={t("gameplay.artLanguage")}>
+                    <SegmentedControl
+                      options={ART_LANGUAGE_VALUES}
+                      value={artLanguage}
+                      onChange={setArtLanguage}
+                      renderLabel={(opt) =>
+                        opt === "auto" ? t("gameplay.artLanguageAuto") : ART_LANGUAGE_LABELS[opt]
+                      }
+                    />
                   </SettingGroup>
 
                   <SettingGroup label={t("gameplay.cardSize")}>

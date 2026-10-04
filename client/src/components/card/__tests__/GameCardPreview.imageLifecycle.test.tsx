@@ -76,6 +76,10 @@ vi.mock("../../../services/scryfall.ts", () => ({
   isCardImageRotatedSync: vi.fn(() => false),
   isLocaleArtReady: vi.fn(() => true),
   loadLocaleArt: vi.fn().mockResolvedValue(undefined),
+  // No derived art locale is active in these tests, so the ladder contributes
+  // no extra rung — the hook's own behaviour is what is under test here.
+  assetFallbackSources: vi.fn(() => []),
+  derivedArtFallbackUrl: vi.fn(() => undefined),
   resolveFaceIndexSync: vi.fn(() => null),
   resolveOracleIdSync: vi.fn(() => null),
   resolvePrintingImageUrl: vi.fn(),

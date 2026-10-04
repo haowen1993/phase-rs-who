@@ -1,5 +1,6 @@
 import type { GameFormat, TokenImageRef } from "../adapter/types";
 import { formatMetadata } from "../data/formatRegistry";
+import { isDerivedArtLocale, type DerivedArtLocale } from "./cardArtLocale.ts";
 import type { CardImageSource, ImageRungs } from "./visualPacks/types.ts";
 
 interface ScryfallImageFace {
@@ -356,6 +357,9 @@ let desiredArtLang = "en";
  *
  * This doubles as the caller's "do I need to load?" gate, so the two meanings
  * must not diverge.
+ *
+ * A derived locale (`zhs`) satisfies this with an empty map, because its art is
+ * derived from the URL rather than looked up in one — see `loadLocaleArt`.
  */
 export function isLocaleArtReady(lang: string): boolean {
   return lang === "en" ? localeArtResolved === null : localeArtResolved?.lang === lang;
@@ -366,12 +370,25 @@ export function isLocaleArtReady(lang: string): boolean {
  * immediately. A missing file (404 for a locale not yet published) resolves to an
  * empty map, so every card falls back to English art — localized art is
  * best-effort display data, never a hard dependency.
+ *
+ * A derived locale (`zhs`) installs the same way but *without* a fetch: its art
+ * is addressed by the English printing id the caller already has, so there is no
+ * sidecar to download. The empty map is the truthful value — `localizeImageUrl`
+ * reads the locale, not the map, on that branch — and installing it is what flips
+ * `isLocaleArtReady`, which is what releases the render path from its
+ * `…:pending` cache key. Returning early *without* installing would leave every
+ * card stuck in the loading state forever.
  */
 export function loadLocaleArt(lang: string): Promise<Map<string, LocalizedArtEntry>> {
   desiredArtLang = lang;
   if (lang === "en") {
     localeArtResolved = null;
     return Promise.resolve(new Map<string, LocalizedArtEntry>());
+  }
+  if (isDerivedArtLocale(lang)) {
+    const map = new Map<string, LocalizedArtEntry>();
+    localeArtResolved = { lang, map };
+    return Promise.resolve(map);
   }
   let promise = localeArtPromises.get(lang);
   if (!promise) {
@@ -594,9 +611,94 @@ export function deriveImageUrl(url: string, size: ImageSize): string {
 }
 
 /**
+ * CDN shape for a derived art locale: a community card-image host that mirrors
+ * Scryfall's own path layout one-for-one, so the same printing id addresses the
+ * same art in another language.
+ *
+ * 大学院废墟 (mtgch.com, formerly sbwsz.com) is the Simplified-Chinese card
+ * database; Scryfall has no Simplified-Chinese printings at all, so this host is
+ * the only source for them. Two path prefixes matter:
+ *
+ *   https://cards.scryfall.io/normal/front/f/2/<uuid>.jpg       ← base URL
+ *   https://images.mtgch.com/zhs/normal/front/f/2/<uuid>.webp    ← 简体中文
+ *   https://images.mtgch.com/sf/normal/front/f/2/<uuid>.webp     ← its English art
+ *
+ * `zhs` is a *per-printing* lookup, not a per-card one: a printing with no
+ * Simplified-Chinese run answers 404 on the `zhs` path while `/sf/` and the
+ * base URL both still serve the English art. That 404 is the only availability
+ * signal — the host exposes no index and no API — which is why the render path
+ * needs a real fallback rung rather than a version check.
+ *
+ * Measured against the live host: `small` (146px), `normal` (488×680, the same
+ * pixels Scryfall serves) and `large` (672×936) exist per face, front and back
+ * alike, and are WebP rather than JPEG. `art_crop` exists ONLY on `/sf/` — see
+ * `derivedArtSource` for why an art crop is nevertheless left alone.
+ */
+export interface DerivedArtSource {
+  /** URL for a five-segment Scryfall image URL, or null when this rung does not exist. */
+  readonly url: string;
+  /** The English-art rung of the same host, used when `url` 404s. */
+  readonly fallback: string;
+}
+
+/**
+ * Rewrite a five-segment Scryfall image URL onto a derived locale's CDN, or
+ * return null when this locale has no rung for that URL.
+ *
+ * Reuses `splitSizedImageUrl` for the same reason `deriveImageUrl` does: the
+ * base URL is the only input the app has, and anything that is not a sized card
+ * image — the card back, the `errors.scryfall.com` placeholder, a test mock —
+ * must come back untouched rather than be rewritten into another host's path.
+ *
+ * **`art_crop` returns null, i.e. the crop is never rewritten.** An art crop is
+ * the illustration alone, so it carries no language; and unlike the face sizes,
+ * the crop URLs in `scryfall-data.json` / `scryfall-printings.json` are stored
+ * verbatim from Scryfall *with* their `?<timestamp>`, so they are the URLs the
+ * browser already has cached. Redirecting them to a second host would re-download
+ * the identical picture at the identical size, on every hover preview, to gain
+ * nothing. (That host does not serve `/zhs/art_crop` at all; the reference
+ * project's own `sf/art_crop` rung exists only because it must rewrite, having
+ * no way to leave a URL alone once it has claimed the element.)
+ *
+ * The trailing `?<timestamp>` is dropped, matching `localizeImageUrl`: it is the
+ * English printing's cache-buster and names an object this host does not have.
+ */
+function derivedArtSource(url: string, lang: DerivedArtLocale): DerivedArtSource | null {
+  const parsed = splitSizedImageUrl(url);
+  if (!parsed) return null;
+  const [host, size, face, shardA, shardB, filename] = parsed.segments;
+  // Only the Scryfall CDN carries the printing id in the shape this derivation
+  // reads. A URL already on another host keeps its own identity.
+  if (host !== "cards.scryfall.io") return null;
+  // Language-neutral, and already cached under its Scryfall URL — see above.
+  if (size === "art_crop") return null;
+  // A UUID contains no `.`, so the first dot always ends the id.
+  const dot = filename.indexOf(".");
+  if (dot < 0) return null;
+  const printingId = filename.slice(0, dot);
+  // Written out rather than `lang` interpolated straight in: the prefix is a
+  // third-party path contract, and spelling both keeps them greppable together.
+  const zhPrefix = lang === "zhs" ? "zhs" : "sf";
+  const base = `https://images.mtgch.com`;
+  const path = `${size}/${face}/${shardA}/${shardB}/${printingId}.webp`;
+  return {
+    url: `${base}/${zhPrefix}/${path}`,
+    fallback: `${base}/sf/${path}`,
+  };
+}
+
+/**
  * Rewrite a Scryfall image URL to the active locale's printing of the same card,
  * returning the input unchanged when there is no locale loaded, the URL is not a
  * sized Scryfall URL, or that printing has no localized sibling.
+ *
+ * Two locale families, one funnel:
+ *   - **Mapped** (`de`/`es`/`fr`/`it`/`ja`/`pt`): the English printing id is
+ *     looked up in the loaded sidecar, which names a *different* Scryfall
+ *     printing whose art is already the right language.
+ *   - **Derived** (`zhs`): the same printing id is re-addressed onto another
+ *     host, because Simplified Chinese printings are not on Scryfall at all.
+ *     See `derivedArtSource`.
  *
  * Reusing `splitSizedImageUrl` is load-bearing, not stylistic. It rejects
  * `CARD_BACK_URL` (four path segments) and the `errors.scryfall.com/soon.jpg`
@@ -606,11 +708,15 @@ export function deriveImageUrl(url: string, size: ImageSize): string {
  * merely found a UUID in the path would rewrite both.
  *
  * The trailing `?<timestamp>` is dropped: it is the *English* printing's
- * cache-buster and means nothing for a different Scryfall object. Omitting it
- * costs only the ability to notice a re-scan of that art.
+ * cache-buster and means nothing for a different Scryfall object (mapped) or for
+ * another host (derived). Omitting it costs only the ability to notice a re-scan
+ * of that art.
  */
 function localizeImageUrl(url: string): string {
   if (!localeArtResolved) return url;
+  if (isDerivedArtLocale(localeArtResolved.lang)) {
+    return derivedArtSource(url, localeArtResolved.lang)?.url ?? url;
+  }
   const parsed = splitSizedImageUrl(url);
   if (!parsed) return url;
   // segments: [host, size, face, id[0], id[1], "<id>.jpg?<timestamp>"]
@@ -629,6 +735,34 @@ function localizeImageUrl(url: string): string {
       ? face.small
       : face.normal;
   return localizedUrl ?? url;
+}
+
+/**
+ * The English-art rung a derived locale falls back to when its own rung 404s,
+ * or undefined when the active locale has no fallback ladder.
+ *
+ * Takes the SAME input as `localizeImageUrl` — a base Scryfall URL — and returns
+ * the second rung, so a caller that has just resolved a URL can ask for the rung
+ * that replaces it on failure without knowing how the derivation works.
+ *
+ * This is the render path's half of `derivedArtSource`: `localizeImageUrl`
+ * returns only the preferred URL, and the hook needs the second rung as a real
+ * `CardImageSource` so `CardImage`'s existing `onError` → `advanceFailedSource`
+ * walk lands on English art instead of the text placeholder. That matters more
+ * than it looks: the 404 is per *printing*, so a Chinese player routinely hits
+ * cards whose Chinese run does not exist (older sets, promos, the tail of a new
+ * set), and without this rung every one of them would render as a placeholder.
+ *
+ * Returns undefined for mapped locales — their own sidecar already resolves a
+ * usable URL per printing — so this changes nothing for the six existing
+ * languages. `fallback === url` is also reported as undefined: a ladder whose
+ * rungs are the same URL would burn a retry on an asset already known broken.
+ */
+export function derivedArtFallbackUrl(url: string): string | undefined {
+  if (!localeArtResolved || !isDerivedArtLocale(localeArtResolved.lang)) return undefined;
+  const source = derivedArtSource(url, localeArtResolved.lang);
+  if (!source || source.fallback === source.url) return undefined;
+  return source.fallback;
 }
 
 /**
@@ -666,6 +800,14 @@ export interface CardImageAsset {
   isRotated: boolean;
   source: CardImageSource;
   rungs?: ImageRungs;
+  /**
+   * Second rung for a derived art locale, or undefined when there is none.
+   *
+   * Carried on the asset rather than derived at render time because only the
+   * locale-aware code above knows whether `src` is a derived-host URL whose
+   * availability is unknown. See `derivedArtFallbackUrl`.
+   */
+  fallbackSrc?: string;
   semantic: {
     oracleId?: string;
     englishPrintingId?: string;
@@ -679,6 +821,26 @@ function remoteImageSource(src: string, size: ImageSize): { source: CardImageSou
     ? undefined
     : { small: deriveImageUrl(src, "small"), normal: deriveImageUrl(src, "normal") };
   return { source: { kind: "remote", src, rungs }, rungs };
+}
+
+/**
+ * The extra ladder rungs a derived art locale contributes beyond the preferred
+ * URL, in order — empty for every other locale, and for any URL that has no
+ * derived rung.
+ *
+ * Kept separate from `assetImageSources` so a caller that already has a resolved
+ * ladder can append without rebuilding it, and so the no-derived-locale path
+ * touches nothing: the six mapped languages produce `[]` here regardless of what
+ * the asset carries.
+ */
+export function assetFallbackSources(
+  src: string,
+  fallbackSrc: string | undefined,
+): CardImageSource[] {
+  const size = fallbackSrc ? imageUrlSize(fallbackSrc) : null;
+  if (!fallbackSrc || !size || fallbackSrc === src) return [];
+  const { source } = remoteImageSource(fallbackSrc, size);
+  return [source];
 }
 
 function isSidewaysLayout(layout: string | undefined): boolean {

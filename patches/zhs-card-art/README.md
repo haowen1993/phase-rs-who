@@ -6,10 +6,12 @@
 
 ```
 patches/zhs-card-art/
-  README.md                                                       ← 本文件
-  0001-feat-art-support-Simplified-Chinese-card-art.patch          ← 功能本体
-  0002-test-art-guard-the-mapped-locales-full-size-vocabula.patch  ← 非回归防护测试
-  0003-fix-art-attach-the-derived-locale-s-English-rung-at-.patch  ← 降级轮的修复（见下）
+  0001-feat-art-support-Simplified-Chinese-card-art.patch        ← 功能本体（派生 URL + 卡图语言偏好）
+  0002-test-art-guard-the-mapped-locales-full-size-vocabula.patch ← 非回归防护测试（既有六语言不受影响）
+  0003-fix-art-attach-the-derived-locale-s-English-rung-at-.patch ← 降级轮挂载位置的修复（见下）
+  0004-fix-art-preserve-the-derived-rung-s-size-instead-of-.patch ← 降级轮尺寸传递的修复（见下）
+  0005-fix-art-show-Chinese-art-when-the-card-s-default-pri.patch ← **按可用性挑印刷**——让真正有中文的印刷被选中
+  0006-feat-scripts-generate-a-derived-locale-s-art-availab.patch ← 可用性表的生成脚本（必须有，否则 0005 不生效）
 ```
 
 补丁内容也保存在一个分支上：`patches/zhs-card-art`（基于 `main` 的 `59b2b17`）。
@@ -137,6 +139,49 @@ https://images.mtgch.com/sf/normal/front/f/2/<uuid>.webp      ← 同一图床�
 
 **教训**：这类「只在某几条路径上生效」的疏漏，单元测试很难覆盖到——它需要针对
 **最普通的调用路径**写测试，而不是针对你以为的那条。
+
+## 必须补的一步：生成「中文可用性表」（补丁 0005 / 0006）
+
+**不做这一步，中文卡图只会有时出现、有时不出现。**
+
+### 为什么需要它
+
+应用渲染的是 `scryfall-data.json` 里记的那个印刷，而那是**最新**的印刷。中文图是**逐印刷**
+存在的，而且**无法从任何 Scryfall 字段推导**——大学院废墟把社区汉化图挂在**英文印刷的 id**
+下，同一个系列内部也没有规律：
+
+```
+Temple of Mystery   默认 soc #414（2026）→ 无中文
+                    实际 who #318         → 有中文 ✅
+Time Wipe           默认 tdc #308（2025）→ 无中文
+                    实际 who #238         → 有中文 ✅
+
+同一张牌的 WHO 内部：#318 有中文，#528 / #909 / #1119 都没有
+```
+
+实测 WHO 全部 1178 个印刷：**398 个（33%）有中文图**。
+
+### 怎么生成
+
+```bash
+# 只测 WHO（推荐，约 15 秒）
+./scripts/gen-derived-art-availability.sh zhs _WHO
+
+# 或测已下载的全部系列
+./scripts/gen-derived-art-availability.sh zhs
+```
+
+产出 `client/public/scryfall-images.zhs-available.json`（约 15 KB，398 个 id）。
+前端在解析时若发现「当前印刷没有中文图」，就换成**有中文图的第一个印刷**。
+
+⚠️ 脚本里两条规则是**必须**的，改了会得到看似正常但完全错误的覆盖率：
+
+- **必须用 GET，不能用 HEAD。** 该图床对未命中边缘缓存的 HEAD 返回 404、对同一 URL 的 GET
+  返回 200。用 HEAD 跑出来是「覆盖率 0%」，而脚本看起来一切正常。
+- **用 `Range: bytes=0-0`**，每次只取 1 字节（存在 206、不存在 404），不必下载整池图片。
+
+重试后仍失败的探测会**单独计数并告警**，不会混进「无中文」——否则一次网络抖动就会让某个
+本来有中文的印刷被永久跳过。
 
 ## 验证情况
 

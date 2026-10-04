@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { insertBeforeTerminalFallback } from "../../hooks/useCardImage.ts";
-import { resolveArtLanguage } from "../cardArtLocale.ts";
+import { isDerivedArtLocale, resolveArtLanguage } from "../cardArtLocale.ts";
 import { assetKey, catalogRoot, packId } from "../visualPacks/types.ts";
 
 import type { PrintingEntry } from "../scryfall.ts";
@@ -2275,5 +2275,104 @@ describe("derived art ladder ordering", () => {
     const ladder = insertBeforeTerminalFallback([remote("zhs.webp")], [remote("sf.webp")]);
 
     expect(ladder.map((source) => source.src)).toEqual(["zhs.webp", "sf.webp"]);
+  });
+});
+
+/**
+ * Guard for the derived branch's early return.
+ *
+ * `localizeImageUrl` now asks `isDerivedArtLocale` before consulting the sidecar
+ * map, and `derivedArtSource` returns null for `art_crop`. If that guard ever
+ * grew to cover the mapped locales — or if the derived short-circuit stopped
+ * falling through — the six existing languages would silently lose part of their
+ * art vocabulary. These cases assert the mapped path still resolves per size,
+ * which is exactly what a too-greedy guard would break while the `normal`-size
+ * tests above kept passing.
+ */
+describe("mapped locales keep their full size vocabulary", () => {
+  const EN_ID = "0dbac7ce-a6fa-466e-b6ba-173cf2dec98e";
+  const DE_ID = "345a1cf0-e4de-42a9-9c72-ed16826b9067";
+
+  const cardUrl = (id: string, size = "normal", face = "front", query = "") =>
+    `https://cards.scryfall.io/${size}/${face}/${id[0]}/${id[1]}/${id}.jpg${query}`;
+
+  const printing = (id: string): PrintingEntry => ({
+    id,
+    set: "mid",
+    set_name: "Innistrad: Midnight Hunt",
+    collector_number: "7",
+    released_at: "2021-09-24",
+    border_color: "black",
+    frame_effects: [],
+    full_art: false,
+    faces: [
+      {
+        small: cardUrl(id, "small"),
+        normal: cardUrl(id),
+        art_crop: cardUrl(id, "art_crop"),
+      },
+      {
+        small: cardUrl(id, "small", "back"),
+        normal: cardUrl(id, "normal", "back"),
+        art_crop: cardUrl(id, "art_crop", "back"),
+      },
+    ],
+  });
+
+  const localized = {
+    id: DE_ID,
+    faces: [
+      {
+        small: cardUrl(DE_ID, "small"),
+        normal: cardUrl(DE_ID),
+        art_crop: cardUrl(DE_ID, "art_crop"),
+      },
+      {
+        small: cardUrl(DE_ID, "small", "back"),
+        normal: cardUrl(DE_ID, "normal", "back"),
+        art_crop: cardUrl(DE_ID, "art_crop", "back"),
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ["small", cardUrl(DE_ID, "small")],
+    ["normal", cardUrl(DE_ID)],
+    ["art_crop", cardUrl(DE_ID, "art_crop")],
+    ["large", cardUrl(DE_ID)],
+  ] as const)("still swaps %s onto the localized printing", async (size, expected) => {
+    const mod = await loadScryfallModule();
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ [EN_ID]: localized }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await mod.loadLocaleArt("de");
+
+    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, size)).toBe(expected);
+  });
+
+  it("offers no derived rung for a mapped locale", async () => {
+    const mod = await loadScryfallModule();
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ [EN_ID]: localized }), { status: 200 }),
+    );
+    await mod.loadLocaleArt("de");
+
+    // A mapped locale resolves a usable per-printing URL from its sidecar, so it
+    // takes no second host rung; the value stays undefined rather than inheriting
+    // any derived-locale behaviour.
+    expect(mod.derivedArtFallbackUrl(cardUrl(EN_ID))).toBeUndefined();
+    expect(isDerivedArtLocale("de")).toBe(false);
+    expect(isDerivedArtLocale("zhs")).toBe(true);
+    // The vocabulary is the discriminator, so it must not accept the UI-only or
+    // mapped codes as derived ones.
+    expect(isDerivedArtLocale("pl")).toBe(false);
+    expect(isDerivedArtLocale("en")).toBe(false);
   });
 });

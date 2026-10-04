@@ -9,6 +9,7 @@ patches/zhs-card-art/
   README.md                                                       ← 本文件
   0001-feat-art-support-Simplified-Chinese-card-art.patch          ← 功能本体
   0002-test-art-guard-the-mapped-locales-full-size-vocabula.patch  ← 非回归防护测试
+  0003-fix-art-attach-the-derived-locale-s-English-rung-at-.patch  ← 降级轮的修复（见下）
 ```
 
 补丁内容也保存在一个分支上：`patches/zhs-card-art`（基于 `main` 的 `59b2b17`）。
@@ -118,6 +119,24 @@ https://images.mtgch.com/sf/normal/front/f/2/<uuid>.webp      ← 同一图床�
 （补齐中文界面是 4522 个键的独立工作量，属于第二步），
 波兰语有界面但没有任何本地化卡图。所以设置里多了一个独立的「卡图语言」，
 默认 `auto`（跟随界面语言）——**现有玩家升级后行为逐字节不变**。
+
+## 一个曾经漏掉的降级缺陷（补丁 0003）
+
+实测发现 `Temple of Mystery`、`Time Wipe` 这类牌在中文模式下**不显示卡图**。原因是两处：
+
+1. **降级轮挂错了地方。** 它挂在 `useCardImage` 里，而那里只覆盖三条覆盖路径（衍生物、
+   钉住的印刷、art chain）。**最普通的那条路径**（`fetchCardImageAsset` /
+   `…ByOracleId`，也就是「没有任何卡图偏好」的牌）资产是在 `scryfall.ts` 里构造的，
+   压根不经过那个辅助函数。于是中文图 404 后没有第二轮可走，直接掉到文字占位卡。
+2. **第一次修还修错了顺序。** 我从资产的 `src` 推导降级轮，但那个值**已经被本地化过了**，
+   而 `derivedArtSource` 只认 `cards.scryfall.io` 主机 —— 于是又静默返回 `undefined`。
+   降级轮是**同一个印刷的英文图**，必须从**本地化之前**的 URL 推导。
+
+现在挂在 `resolveImageAsset`（所有存储图像的**唯一漏斗**）里，并且从本地化前的 URL 推导。
+两处都有回归测试钉住（用真实的存储条目，就是上述两张牌）。
+
+**教训**：这类「只在某几条路径上生效」的疏漏，单元测试很难覆盖到——它需要针对
+**最普通的调用路径**写测试，而不是针对你以为的那条。
 
 ## 验证情况
 

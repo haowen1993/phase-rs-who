@@ -4,6 +4,10 @@
 # Node
 node_modules/
 
+# pnpm's content-addressable store, created by `pnpm install` with a local
+# store dir. A build artifact of dependency installation, never source.
+.pnpm-store/
+
 # GSD
 .planning/
 

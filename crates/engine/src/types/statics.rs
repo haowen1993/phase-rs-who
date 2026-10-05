@@ -285,6 +285,13 @@ pub enum CastFrequency {
     OncePerTurnPerPermanentType,
 }
 
+/// `skip_serializing_if` predicate for the boolean permission riders: the
+/// historical default carries no JSON byte, so every previously-serialized
+/// permission round-trips unchanged.
+pub(crate) fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl CastFrequency {
     pub fn is_unlimited(&self) -> bool {
         matches!(self, CastFrequency::Unlimited)
@@ -1550,8 +1557,28 @@ pub enum StaticMode {
         /// graveyard, exile it instead." This is narrower than flashback: it
         /// replaces only stack-to-graveyard destinations produced by this
         /// permission.
+        ///
+        /// NOT the shape for "If you do, it gains 'If this permanent would leave
+        /// the battlefield, exile it instead…'" (The Eighth Doctor): that rider
+        /// redirects a BATTLEFIELD exit, not a stack exit, so it is carried by
+        /// `leave_battlefield_replacement` instead. Reading the two as one would
+        /// silently drop the rider.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graveyard_destination_replacement: Option<Zone>,
+        /// CR 614.1a + CR 611.2a + CR 607.1: "If you do, it gains 'If this
+        /// permanent would leave the battlefield, exile it instead of putting it
+        /// anywhere else.'" (The Eighth Doctor). A permanent cast through THIS
+        /// permission enters carrying the shared
+        /// `leave_battlefield_exile_replacement` authority, applied as a
+        /// `Duration::Permanent` continuous effect scoped to that object
+        /// (CR 611.2c) — the same delivery `enters_with_counter` uses.
+        ///
+        /// A bool rather than the `ReplacementDefinition` itself: the rider is
+        /// one fixed printed sentence, so carrying the parsed definition would
+        /// duplicate the single-authority constructor into every serialized
+        /// permission. `false` (default) preserves the existing shapes exactly.
+        #[serde(default, skip_serializing_if = "crate::types::statics::is_false")]
+        leave_battlefield_replacement: bool,
         /// CR 118.9 + CR 601.2f: Optional non-mana cost rider paid when casting
         /// a spell via this permission. `Additional` is paid on top of the
         /// normal mana cost (Festival of Embers: "by paying 1 life in addition
@@ -3917,6 +3944,7 @@ impl FromStr for StaticMode {
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: GraveyardPermissionPool::OwnGraveyard,
             },
@@ -3938,6 +3966,7 @@ impl FromStr for StaticMode {
                         // to None.
                         extra_cost: None,
                         enters_with_counter: None,
+                        leave_battlefield_replacement: false,
                         required_cast_keyword: None,
                         pool: if rest.contains(&"pool=any_graveyard") {
                             GraveyardPermissionPool::AnyGraveyard
@@ -3952,6 +3981,7 @@ impl FromStr for StaticMode {
                         graveyard_destination_replacement: None,
                         extra_cost: None,
                         enters_with_counter: None,
+                        leave_battlefield_replacement: false,
                         required_cast_keyword: None,
                         pool: GraveyardPermissionPool::OwnGraveyard,
                     }
@@ -5046,6 +5076,7 @@ mod tests {
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: GraveyardPermissionPool::OwnGraveyard,
             },
@@ -5055,6 +5086,7 @@ mod tests {
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: GraveyardPermissionPool::OwnGraveyard,
             },
@@ -5064,6 +5096,7 @@ mod tests {
                 graveyard_destination_replacement: Some(Zone::Exile),
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: GraveyardPermissionPool::AnyGraveyard,
             },
@@ -5258,6 +5291,7 @@ mod tests {
                     mode: CastCostMode::Additional,
                 }),
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: GraveyardPermissionPool::OwnGraveyard,
             },

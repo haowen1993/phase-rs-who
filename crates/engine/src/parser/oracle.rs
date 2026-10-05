@@ -2632,6 +2632,7 @@ fn plain_own_graveyard_cast_grant_filter(effect: &Effect) -> Option<&TargetFilte
             graveyard_destination_replacement: None,
             extra_cost: None,
             enters_with_counter: None,
+            leave_battlefield_replacement: false,
             required_cast_keyword: None,
             pool: GraveyardPermissionPool::OwnGraveyard,
         } => definition.affected.as_ref(),
@@ -2695,6 +2696,7 @@ fn coordinated_graveyard_permission(cast_target: &TargetFilter) -> Option<Static
             graveyard_destination_replacement: None,
             extra_cost: None,
             enters_with_counter: None,
+            leave_battlefield_replacement: false,
             required_cast_keyword: None,
             pool: GraveyardPermissionPool::OwnGraveyard,
         })

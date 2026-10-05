@@ -409,6 +409,7 @@ fn a_printed_own_graveyard_permission_refuses_the_opponents_card_at_cast() {
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: GraveyardPermissionPool::OwnGraveyard,
             })

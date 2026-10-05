@@ -12806,6 +12806,7 @@ this spell's mana cost.\nDestroy target attacking creature without flying.",
             graveyard_destination_replacement: None,
             extra_cost: None,
             enters_with_counter: Some(CounterType::Finality),
+            leave_battlefield_replacement: false,
             required_cast_keyword: None,
             pool: crate::types::statics::GraveyardPermissionPool::OwnGraveyard,
         });
@@ -12893,6 +12894,7 @@ this spell's mana cost.\nDestroy target attacking creature without flying.",
             graveyard_destination_replacement: None,
             extra_cost: None,
             enters_with_counter: Some(CounterType::Finality),
+            leave_battlefield_replacement: false,
             required_cast_keyword: None,
             pool: crate::types::statics::GraveyardPermissionPool::OwnGraveyard,
         });
@@ -14221,6 +14223,7 @@ mod detect_condition_if_replacement_exemption_tests {
             graveyard_destination_replacement: None,
             extra_cost: None,
             enters_with_counter: Some(CounterType::Finality),
+            leave_battlefield_replacement: false,
             required_cast_keyword: None,
             pool: crate::types::statics::GraveyardPermissionPool::OwnGraveyard,
         });

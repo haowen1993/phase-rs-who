@@ -32040,6 +32040,7 @@ fn chosen_muldrotha_variant_requests_and_consumes_permanent_type_slot() {
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: crate::types::statics::GraveyardPermissionPool::OwnGraveyard,
             })
@@ -32188,6 +32189,7 @@ fn muldrotha_and_graveyard_artifact_creature(state: &mut GameState) -> (ObjectId
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: crate::types::statics::GraveyardPermissionPool::OwnGraveyard,
             })

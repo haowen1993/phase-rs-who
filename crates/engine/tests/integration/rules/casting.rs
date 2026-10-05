@@ -1282,6 +1282,7 @@ fn play_land_from_graveyard_with_permission() {
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: engine::types::statics::GraveyardPermissionPool::OwnGraveyard,
             })
@@ -1352,6 +1353,7 @@ fn play_land_from_graveyard_respects_land_drop_limit() {
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: engine::types::statics::GraveyardPermissionPool::OwnGraveyard,
             })
@@ -1423,6 +1425,7 @@ fn muldrotha_per_permanent_type_blocks_second_land_from_graveyard() {
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: engine::types::statics::GraveyardPermissionPool::OwnGraveyard,
             })
@@ -1505,6 +1508,7 @@ fn muldrotha_per_permanent_type_resets_at_turn_start() {
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: engine::types::statics::GraveyardPermissionPool::OwnGraveyard,
             })

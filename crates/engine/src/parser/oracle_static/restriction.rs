@@ -2031,6 +2031,7 @@ pub(crate) fn try_parse_graveyard_cast_permission(
                 graveyard_destination_replacement: None,
                 extra_cost: None,
                 enters_with_counter: None,
+                leave_battlefield_replacement: false,
                 required_cast_keyword: None,
                 pool: GraveyardPermissionPool::OwnGraveyard,
             })
@@ -2297,6 +2298,7 @@ pub(crate) fn try_parse_graveyard_cast_permission(
         graveyard_destination_replacement,
         extra_cost,
         enters_with_counter,
+        leave_battlefield_replacement: false,
         required_cast_keyword,
         pool: GraveyardPermissionPool::OwnGraveyard,
     })
@@ -2823,6 +2825,7 @@ fn try_parse_disjunctive_graveyard_cast_permission(
         graveyard_destination_replacement: None,
         extra_cost: None,
         enters_with_counter: None,
+        leave_battlefield_replacement: false,
         required_cast_keyword: None,
         pool: GraveyardPermissionPool::OwnGraveyard,
     })
@@ -2870,6 +2873,7 @@ fn try_parse_unlimited_combined_graveyard_permission(
             graveyard_destination_replacement: None,
             extra_cost: None,
             enters_with_counter: None,
+            leave_battlefield_replacement: false,
             required_cast_keyword: None,
             pool: GraveyardPermissionPool::OwnGraveyard,
         })

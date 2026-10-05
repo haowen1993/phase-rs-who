@@ -1307,6 +1307,7 @@ fn a_granted_counter_rider_is_latched_when_the_grant_ends_mid_payment() {
         graveyard_destination_replacement: None,
         extra_cost: None,
         enters_with_counter: Some(CounterType::Finality),
+        leave_battlefield_replacement: false,
         required_cast_keyword: None,
         pool: engine::types::statics::GraveyardPermissionPool::OwnGraveyard,
     })
@@ -1418,6 +1419,7 @@ fn land_permission(
             graveyard_destination_replacement: None,
             extra_cost: None,
             enters_with_counter: None,
+            leave_battlefield_replacement: false,
             required_cast_keyword: None,
             pool: engine::types::statics::GraveyardPermissionPool::OwnGraveyard,
         },

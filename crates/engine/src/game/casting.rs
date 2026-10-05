@@ -5627,6 +5627,7 @@ fn graveyard_permission_sources(
                         // Applied at the finalize_cast seam from the cast's
                         // latched terms; carried here so the menu shows it.
                         ref enters_with_counter,
+                        leave_battlefield_replacement: _,
                         required_cast_keyword,
                         pool,
                     } if graveyard_permission_play_mode_matches(play_mode, play_mode_filter) => {
@@ -5751,6 +5752,7 @@ fn transient_graveyard_permission_sources(
                         graveyard_destination_replacement,
                         ref extra_cost,
                         ref enters_with_counter,
+                        leave_battlefield_replacement: _,
                         required_cast_keyword,
                         pool,
                     } = definition.mode

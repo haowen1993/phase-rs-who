@@ -16678,6 +16678,7 @@ mod tests {
                         graveyard_destination_replacement: None,
                         extra_cost: None,
                         enters_with_counter: None,
+                        leave_battlefield_replacement: false,
                         required_cast_keyword: None,
                         pool: crate::types::statics::GraveyardPermissionPool::OwnGraveyard,
                     },

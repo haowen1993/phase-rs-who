@@ -2064,6 +2064,7 @@ pub(crate) fn creature_permission(
         graveyard_destination_replacement: None,
         extra_cost: None,
         enters_with_counter: None,
+        leave_battlefield_replacement: false,
         required_cast_keyword,
         pool: engine::types::statics::GraveyardPermissionPool::OwnGraveyard,
     })

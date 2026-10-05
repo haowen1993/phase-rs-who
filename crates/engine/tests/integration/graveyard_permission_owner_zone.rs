@@ -68,6 +68,7 @@ fn printed_graveyard_permission(
         graveyard_destination_replacement: None,
         extra_cost: None,
         enters_with_counter: None,
+        leave_battlefield_replacement: false,
         required_cast_keyword: None,
         pool: engine::types::statics::GraveyardPermissionPool::OwnGraveyard,
     })

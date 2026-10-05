@@ -23893,6 +23893,7 @@ fn try_parse_class_wide_graveyard_cast_grant(lower: &str) -> Option<Effect> {
         graveyard_destination_replacement: None,
         extra_cost: None,
         enters_with_counter: None,
+        leave_battlefield_replacement: false,
         required_cast_keyword: None,
         pool,
     })

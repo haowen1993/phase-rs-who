@@ -1,0 +1,434 @@
+From 3925b9117ae991872de6666600bf4e722680fa67 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Mon, 5 Oct 2026 05:23:47 +0800
+Subject: [PATCH 3/3] feat(parser): support Replicate costs that are not mana
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Unlocks Exterminate!, the last unsupported card in the Masters of Evil precon.
+
+Four defects stacked on one card, and the third would have shipped a card that
+parses and then cannot be cast:
+
+1. `Keyword::from_str` splits a keyword's parameter on a COLON, but Oracle prints
+   Replicate's cost after an em-dash ("Replicate—Tap an untapped Dalek you
+   control"). The whole phrase became the keyword name, matched no arm, and the
+   keyword vanished — the line then read as an unrecognized clause head.
+
+2. `Keyword::Replicate(ManaCost)` could not hold the cost at all. Widened to
+   `AbilityCost`, which is the same move `BlitzCost` and `FlashbackCost` already
+   make for their non-mana forms. The em-dash is load-bearing here: Wizards
+   reserves it for the non-mana/compound form and prints the ordinary one as
+   "Replicate {U}", because a dash would be ambiguous with a negative mana value.
+
+3. `parse_oracle_cost` strips reminder text with `take_until(" (")`, which leaves
+   the sentence period attached to the cost. Every `remainder.trim().is_empty()`
+   guard in `parse_single_cost` then fails, and the cost silently falls through to
+   the generic `EffectCost` parser — producing `SetTapState`, which
+   `supports_effect_cost_payment` REJECTS at runtime. Exterminate! parsed green
+   and would have been uncastable. Fixed at `parse_oracle_cost` rather than at the
+   replicate caller, because the same period survives any em-dash cost form.
+
+4. The client's `MANA_OR_NON_MANA_COST_KEYWORDS` formatter reads its payload from
+   `data` (the adjacent-tagged sibling enums), but a bare `AbilityCost` is
+   internally tagged and carries it under `cost`. Every replicate cost rendered
+   blank. It now reads both keys.
+
+The client's keyword-payload golden is regenerated from the engine
+(`UPDATE_WIRE_GOLDEN=1`); the only drifted entry is Replicate.
+
+Result: WHO unsupported 24 -> 23; Masters of Evil precon is now fully supported.
+---
+ crates/engine/src/database/synthesis.rs       | 39 +++++----
+ crates/engine/src/game/casting_costs.rs       | 10 +--
+ crates/engine/src/game/triggers.rs            |  4 +-
+ crates/engine/src/parser/oracle_cost.rs       | 47 +++++++++++
+ crates/engine/src/parser/oracle_keyword.rs    | 83 +++++++++++++++++++
+ .../src/parser/oracle_static/keyword_grant.rs |  9 +-
+ .../engine/src/parser/oracle_static/tests.rs  |  4 +-
+ crates/engine/src/types/keywords.rs           | 25 ++++--
+ 8 files changed, 192 insertions(+), 29 deletions(-)
+
+diff --git a/crates/engine/src/database/synthesis.rs b/crates/engine/src/database/synthesis.rs
+index 2403ab673b..a9cd6cfb2f 100644
+--- a/crates/engine/src/database/synthesis.rs
++++ b/crates/engine/src/database/synthesis.rs
+@@ -2595,13 +2595,14 @@ pub fn synthesize_replicate(face: &mut CardFace) {
+     }
+ 
+     // CR 702.56a: "As an additional cost to cast this spell, you may pay [cost]
+-    // any number of times." Repeatable optional mana cost — the cast-time
+-    // payment loop records each payment in `additional_cost_payment_count`.
++    // any number of times." Repeatable optional cost — the cast-time payment
++    // loop records each payment in `additional_cost_payment_count`.
+     if face.additional_cost.is_none() {
+         face.additional_cost = Some(AdditionalCost::Optional {
+-            cost: AbilityCost::Mana {
+-                cost: replicate_costs[0].clone(),
+-            },
++            // Already an `AbilityCost`: `Keyword::Replicate` holds the parsed
++            // cost directly so a non-mana replicate cost (Exterminate!'s "Tap
++            // an untapped Dalek you control") reaches this slot unwrapped.
++            cost: replicate_costs[0].clone(),
+             repeatability: crate::types::ability::AdditionalCostRepeatability::Repeatable,
+         });
+     }
+@@ -20182,7 +20183,9 @@ mod replicate_synthesis_tests {
+             shards: vec![ManaCostShard::Blue],
+         };
+         let mut face = CardFace {
+-            keywords: vec![Keyword::Replicate(replicate_cost.clone())],
++            keywords: vec![Keyword::Replicate(AbilityCost::Mana {
++                cost: replicate_cost.clone(),
++            })],
+             ..CardFace::default()
+         };
+ 
+@@ -20238,9 +20241,11 @@ mod replicate_synthesis_tests {
+     #[test]
+     fn synthesize_replicate_is_idempotent() {
+         let mut face = CardFace {
+-            keywords: vec![Keyword::Replicate(ManaCost::Cost {
+-                generic: 2,
+-                shards: vec![],
++            keywords: vec![Keyword::Replicate(AbilityCost::Mana {
++                cost: ManaCost::Cost {
++                    generic: 2,
++                    shards: vec![],
++                },
+             })],
+             ..CardFace::default()
+         };
+@@ -20260,13 +20265,17 @@ mod replicate_synthesis_tests {
+     fn synthesize_replicate_emits_one_trigger_per_instance() {
+         let mut face = CardFace {
+             keywords: vec![
+-                Keyword::Replicate(ManaCost::Cost {
+-                    generic: 1,
+-                    shards: vec![],
++                Keyword::Replicate(AbilityCost::Mana {
++                    cost: ManaCost::Cost {
++                        generic: 1,
++                        shards: vec![],
++                    },
+                 }),
+-                Keyword::Replicate(ManaCost::Cost {
+-                    generic: 2,
+-                    shards: vec![],
++                Keyword::Replicate(AbilityCost::Mana {
++                    cost: ManaCost::Cost {
++                        generic: 2,
++                        shards: vec![],
++                    },
+                 }),
+             ],
+             ..CardFace::default()
+diff --git a/crates/engine/src/game/casting_costs.rs b/crates/engine/src/game/casting_costs.rs
+index 82911f7035..9fe96bf3e9 100644
+--- a/crates/engine/src/game/casting_costs.rs
++++ b/crates/engine/src/game/casting_costs.rs
+@@ -10746,11 +10746,7 @@ pub(super) fn effective_replicate_additional_cost_instances(
+             // CR 601.2f: Additional costs must be concrete before affordability
+             // and payment; Hatchery Sliver's `SelfManaCost` is the recipient
+             // spell's mana cost, not a free placeholder.
+-            let cost = super::keywords::resolve_self_mana_in_ability_cost(
+-                state,
+-                object_id,
+-                &AbilityCost::Mana { cost },
+-            );
++            let cost = super::keywords::resolve_self_mana_in_ability_cost(state, object_id, &cost);
+             AdditionalCostInstance::new_with_ordinal(
+                 AdditionalCostOrigin::Replicate,
+                 u32::try_from(ordinal).unwrap_or(u32::MAX),
+@@ -25756,7 +25752,9 @@ its replicate cost was paid.)\nDraw a card.";
+             generic: 1,
+         };
+         StaticDefinition::new(StaticMode::CastWithKeyword {
+-            keyword: Keyword::Replicate(replicate_cost),
++            keyword: Keyword::Replicate(AbilityCost::Mana {
++                cost: replicate_cost,
++            }),
+         })
+         .affected(TargetFilter::Typed(
+             TypedFilter::new(TypeFilter::Instant).controller(ControllerRef::You),
+diff --git a/crates/engine/src/game/triggers.rs b/crates/engine/src/game/triggers.rs
+index 52ed349498..02a1f062fd 100644
+--- a/crates/engine/src/game/triggers.rs
++++ b/crates/engine/src/game/triggers.rs
+@@ -37716,7 +37716,9 @@ pub mod tests {
+             Zone::Battlefield,
+         );
+         let grant = StaticDefinition::new(StaticMode::CastWithKeyword {
+-            keyword: Keyword::Replicate(ManaCost::SelfManaCost),
++            keyword: Keyword::Replicate(AbilityCost::Mana {
++                cost: ManaCost::SelfManaCost,
++            }),
+         })
+         .affected(TargetFilter::Typed(
+             TypedFilter::new(TypeFilter::Subtype("Sliver".into())).controller(ControllerRef::You),
+diff --git a/crates/engine/src/parser/oracle_cost.rs b/crates/engine/src/parser/oracle_cost.rs
+index 1d4444b9ed..20cb4ce506 100644
+--- a/crates/engine/src/parser/oracle_cost.rs
++++ b/crates/engine/src/parser/oracle_cost.rs
+@@ -39,6 +39,15 @@ use crate::types::zones::Zone;
+ /// Returns an AbilityCost (possibly Composite for multi-part costs).
+ pub fn parse_oracle_cost(text: &str) -> AbilityCost {
+     let text = text.trim();
++    // A cost phrase arrives as a sentence fragment. When reminder text is
++    // stripped before this call the sentence period can survive as the last
++    // character ("Tap an untapped Dalek you control." reached us from the
++    // Replicate/Fallback em-dash form), and a trailing period defeats every
++    // `remainder.trim().is_empty()` guard in `parse_single_cost` — the cost then
++    // silently falls through to the `EffectCost` parser, which produces a
++    // cost that `supports_effect_cost_payment` rejects at runtime. Dropping the
++    // terminal period here fixes the class rather than one caller.
++    let text = text.trim_end_matches('.').trim();
+     let lower = text.to_lowercase();
+ 
+     if let Some(cost) = parse_oxford_mana_alternatives_nom(&lower)
+@@ -2416,6 +2425,44 @@ fn parse_mana_cost_nom(
+     }
+ }
+ 
++#[cfg(test)]
++mod trailing_period_tests {
++    use super::*;
++
++    /// A cost phrase reaching `parse_oracle_cost` with a sentence period must
++    /// parse identically to the bare phrase.
++    ///
++    /// Regression: stripping reminder text from an em-dash cost form
++    /// ("Tap an untapped Dalek you control. (When you cast this spell, …)")
++    /// leaves the period attached. Every `remainder.trim().is_empty()` guard in
++    /// `parse_single_cost` then fails, the cost falls through to the generic
++    /// `EffectCost` parser, and the resulting `SetTapState` cost is rejected by
++    /// `supports_effect_cost_payment` at runtime — a parse that looks successful
++    /// and a card that cannot be used.
++    #[test]
++    fn a_trailing_sentence_period_does_not_change_the_cost() {
++        for phrase in [
++            "Tap an untapped Dalek you control",
++            "Tap two untapped creatures you control",
++            "Sacrifice a creature",
++        ] {
++            assert_eq!(
++                parse_oracle_cost(&format!("{phrase}.")),
++                parse_oracle_cost(phrase),
++                "trailing period changed the parse of {phrase:?}"
++            );
++        }
++    }
++
++    #[test]
++    fn a_trailing_period_still_yields_a_payable_tap_cost() {
++        assert!(matches!(
++            parse_oracle_cost("Tap an untapped Dalek you control."),
++            AbilityCost::TapCreatures { .. }
++        ));
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/crates/engine/src/parser/oracle_keyword.rs b/crates/engine/src/parser/oracle_keyword.rs
+index 25f02a3845..b1219d22e4 100644
+--- a/crates/engine/src/parser/oracle_keyword.rs
++++ b/crates/engine/src/parser/oracle_keyword.rs
+@@ -840,6 +840,37 @@ fn split_outside_braces(text: &str) -> Vec<&str> {
+ /// letting the runtime split (see `split_flashback_cost` in casting.rs) extract the
+ /// mana sub-cost from a Composite for normal mana payment while routing the residual
+ /// non-mana sub-costs through `pay_additional_cost`.
++/// CR 702.56a: Replicate's em-dash cost form — "Replicate—Tap an untapped Dalek
++/// you control" (Exterminate!).
++///
++/// The em-dash is load-bearing: Wizards reserves it for the NON-mana (or
++/// compound) form, and prints the ordinary form as "Replicate {U}" with a space
++/// — because a dash there would be ambiguous with a negative mana value. So a
++/// dash means the cost cannot be read as a bare mana cost and must go through
++/// `parse_oracle_cost`, exactly like `flashback—` and `bestow—` above.
++///
++/// Returns `None` when the cost text does not parse, so the line falls through
++/// to the ordinary parser and becomes an honest `Effect::Unimplemented` rather
++/// than a Replicate whose cost is a placeholder.
++fn parse_replicate_dash_cost(cost_text: &str) -> Option<AbilityCost> {
++    let trimmed = cost_text.trim().trim_end_matches('.').trim_end_matches(')');
++    // Strip reminder text in parentheses: take everything before the first " (".
++    let clean = opt(take_until::<_, _, OracleError<'_>>(" ("))
++        .parse(trimmed)
++        .map(|(_, before)| before.unwrap_or(trimmed))
++        .unwrap_or(trimmed)
++        .trim();
++    if clean.is_empty() {
++        return None;
++    }
++    match super::oracle_cost::parse_oracle_cost(clean) {
++        // `parse_oracle_cost` answers `Unimplemented` for text it cannot read;
++        // that is a parse failure here, not a cost.
++        AbilityCost::Unimplemented { .. } => None,
++        cost => Some(cost),
++    }
++}
++
+ fn parse_flashback_cost(cost_text: &str) -> Option<FlashbackCost> {
+     let trimmed = cost_text.trim().trim_end_matches('.').trim_end_matches(')');
+     // Strip reminder text in parentheses: take everything before the first " (".
+@@ -1562,6 +1593,13 @@ pub(crate) fn parse_keyword_line_core(text: &str) -> Option<(Keyword, &str)> {
+         }
+     }
+ 
++    // CR 702.56a: Replicate with a non-mana cost uses the em-dash separator.
++    if let Ok((rest, _)) = tag::<_, _, OracleError<'_>>("replicate\u{2014}").parse(text) {
++        if let Some(rep_cost) = parse_replicate_dash_cost(rest) {
++            return Some((Keyword::Replicate(rep_cost), ""));
++        }
++    }
++
+     // CR 702.21a: Ward with non-mana costs uses em-dash separator (U+2014).
+     // "ward—pay N life", "ward—discard a card", "ward—sacrifice a permanent"
+     if let Ok((rest, _)) = tag::<_, _, OracleError<'_>>("ward\u{2014}").parse(text) {
+@@ -3876,6 +3914,51 @@ mod tests {
+         };
+     }
+ 
++    /// CR 702.56a: Replicate's em-dash cost form (Exterminate!).
++    ///
++    /// The cost must arrive as an `AbilityCost::TapCreatures` — a cost the
++    /// payment authority can actually resolve — rather than falling through to
++    /// the `EffectCost` parser, whose `SetTapState` shape
++    /// `supports_effect_cost_payment` rejects at runtime. The reminder text in
++    /// parentheses and the sentence period must both be stripped first.
++    #[test]
++    fn parse_replicate_dash_cost_reads_a_tap_cost_and_strips_reminder_text() {
++        assert_eq!(
++            parse_replicate_dash_cost(
++                "Tap an untapped Dalek you control. (When you cast this spell, copy it for \
++                 each time you paid its replicate cost. You may choose new targets for the \
++                 copies.)"
++            ),
++            Some(AbilityCost::TapCreatures {
++                requirement: crate::types::ability::TapCreaturesRequirement::count(1),
++                filter: TargetFilter::Typed(
++                    crate::types::ability::TypedFilter::new(
++                        crate::types::ability::TypeFilter::Subtype("Dalek".into())
++                    )
++                    .controller(ControllerRef::You)
++                ),
++            })
++        );
++    }
++
++    /// A cost the engine cannot express must not become a Replicate with a
++    /// placeholder cost — the line has to fall through and be reported as
++    /// unimplemented instead.
++    #[test]
++    fn parse_replicate_dash_cost_rejects_unparseable_text() {
++        assert_eq!(parse_replicate_dash_cost("frobnicate the whatsit"), None);
++        assert_eq!(parse_replicate_dash_cost("   "), None);
++    }
++
++    /// The ordinary form stays mana, and must not be diverted by the em-dash arm.
++    #[test]
++    fn parse_granted_keyword_fragment_replicate_mana_is_unaffected() {
++        let kw = parse_granted_keyword_fragment("Replicate {1}{U}").unwrap();
++        let Keyword::Replicate(AbilityCost::Mana { .. }) = kw else {
++            panic!("expected a mana replicate cost, got {kw:?}");
++        };
++    }
++
+     #[test]
+     fn parse_granted_keyword_fragment_ward_pay_life_equal_to_power() {
+         assert_eq!(
+diff --git a/crates/engine/src/parser/oracle_static/keyword_grant.rs b/crates/engine/src/parser/oracle_static/keyword_grant.rs
+index 604af4b60e..7beb6f6323 100644
+--- a/crates/engine/src/parser/oracle_static/keyword_grant.rs
++++ b/crates/engine/src/parser/oracle_static/keyword_grant.rs
+@@ -255,7 +255,14 @@ fn parse_granted_self_cost_keyword(keyword_str: &str) -> Option<Keyword> {
+             (|c| Keyword::Blitz(crate::types::keywords::BlitzCost::Mana(c)))
+                 as fn(ManaCost) -> Keyword,
+         ),
+-        ("replicate", Keyword::Replicate as fn(ManaCost) -> Keyword),
++        // CR 702.56a: like blitz above, a GRANTED self-referential replicate is
++        // always pure mana ("the replicate cost is equal to its mana cost"), so the
++        // grant binds `AbilityCost::Mana`. The em-dash non-mana form is printed
++        // text on the card itself, never granted.
++        (
++            "replicate",
++            (|c| Keyword::Replicate(AbilityCost::Mana { cost: c })) as fn(ManaCost) -> Keyword,
++        ),
+     ]
+     .into_iter()
+     .find_map(|(name, ctor)| {
+diff --git a/crates/engine/src/parser/oracle_static/tests.rs b/crates/engine/src/parser/oracle_static/tests.rs
+index 71735076e5..8bceb5a795 100644
+--- a/crates/engine/src/parser/oracle_static/tests.rs
++++ b/crates/engine/src/parser/oracle_static/tests.rs
+@@ -13564,7 +13564,9 @@ fn static_grant_replicate_hatchery_sliver() {
+     assert_eq!(
+         def.mode,
+         StaticMode::CastWithKeyword {
+-            keyword: Keyword::Replicate(ManaCost::SelfManaCost),
++            keyword: Keyword::Replicate(AbilityCost::Mana {
++                cost: ManaCost::SelfManaCost,
++            }),
+         }
+     );
+     let Some(TargetFilter::Typed(tf)) = &def.affected else {
+diff --git a/crates/engine/src/types/keywords.rs b/crates/engine/src/types/keywords.rs
+index d810f7b0d4..20ffed0cdd 100644
+--- a/crates/engine/src/types/keywords.rs
++++ b/crates/engine/src/types/keywords.rs
+@@ -1152,7 +1152,7 @@ pub enum Keyword {
+     /// replicate cost was paid. If the spell has any targets, you may
+     /// choose new targets for any of the copies." Carries the per-copy
+     /// mana cost.
+-    Replicate(ManaCost),
++    Replicate(AbilityCost),
+ 
+     /// CR 702.113a: Awaken N—{cost} — alternative cost that also puts N +1/+1
+     /// counters on target land you control, animating it as a 0/0 Elemental
+@@ -2887,7 +2887,11 @@ impl FromStr for Keyword {
+                 "squad" => return Ok(Keyword::Squad(parse_keyword_mana_cost(p))),
+                 // CR 702.56a: Replicate {cost} — repeatable optional additional
+                 // cost paid at cast; copy the spell once per payment.
+-                "replicate" => return Ok(Keyword::Replicate(parse_keyword_mana_cost(p))),
++                "replicate" => {
++                    return Ok(Keyword::Replicate(AbilityCost::Mana {
++                        cost: parse_keyword_mana_cost(p),
++                    }))
++                }
+                 // CR 702.29: Typecycling — "typecycling:{subtype}:{cost}"
+                 "typecycling" => {
+                     if let Some(colon_pos) = p.find(':') {
+@@ -3877,8 +3881,19 @@ fn keyword_from_tagged(variant: &str, data: &serde_json::Value) -> Result<Keywor
+         }
+         // CR 702.157
+         "Squad" => Ok(Keyword::Squad(mana(data)?)),
+-        // CR 702.56a: Replicate {cost}
+-        "Replicate" => Ok(Keyword::Replicate(mana(data)?)),
++        // CR 702.56a: Replicate {cost} — the cost is an `AbilityCost`, because a
++        // replicate cost is not always mana (Exterminate!'s "Tap an untapped
++        // Dalek you control"). Accepts BOTH shapes so already-emitted
++        // card-data.json files keep loading: the current tagged form
++        // (`{"type":"Mana",...}` / `{"type":"TapCreatures",...}`) and the
++        // pre-widening bare `ManaCost` object.
++        "Replicate" => {
++            if let Ok(cost) = serde_json::from_value::<AbilityCost>(data.clone()) {
++                Ok(Keyword::Replicate(cost))
++            } else {
++                Ok(Keyword::Replicate(AbilityCost::Mana { cost: mana(data)? }))
++            }
++        }
+         // CR 702.29
+         "Typecycling" => {
+             let obj = data.as_object().ok_or("Typecycling: expected object")?;
+@@ -5815,7 +5830,7 @@ mod tests {
+             Keyword::Escalate(pay_life_cost()),
+             Keyword::Recover(mc("{2}{R}")),
+             Keyword::Cleave(mc("{2}{R}")),
+-            Keyword::Replicate(mc("{2}{R}")),
++            Keyword::Replicate(AbilityCost::Mana { cost: mc("{2}{R}") }),
+             Keyword::Awaken {
+                 count: 4,
+                 cost: mc("{5}{W}{W}{W}"),

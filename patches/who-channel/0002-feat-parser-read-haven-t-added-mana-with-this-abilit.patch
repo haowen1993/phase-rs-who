@@ -1,0 +1,146 @@
+From 06ad0199a93c76a69f87980d07814aaee4c02b37 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Mon, 5 Oct 2026 02:55:27 +0800
+Subject: [PATCH 2/3] feat(parser): read "haven't added mana with this ability
+ this turn"
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Unlocks Carpet of Flowers, one of the two cards the Paradox Power precon
+reported as unsupported.
+
+The condition is the NEGATIVE reading of the per-ability resolution tally that
+`AbilityUseCountThisTurn` already carries, so it needs a third template arm and
+no engine change at all: `{ tally: Resolved, comparator: LT, n: 1 }`. `LT 1`
+rather than `EQ 0` because `n` is a `u32` on the variant and zero is not in the
+comparison vocabulary its siblings use.
+
+Checked the `add-engine-variant` gate first, and it returned
+REFUSE_WITH_EXISTING_SLOT: `AbilityUseCountThisTurn` keys by
+`(source_id, ability_index)` and is cleared at end of turn, which is exactly
+"this ability, this turn". A "produced mana" tally would need `ManaAdded` to
+carry an `ability_index` — it carries only `source_id`, so mana cannot be
+attributed to a printed ability at all — and the gap it would close is empty
+here: the ability requires a target opponent and adds X mana where X is that
+opponent's Island count, so a resolution that occurs always adds mana.
+
+Result: WHO unsupported cards 26 -> 25; Paradox Power precon 2 -> 1.
+---
+ .../src/parser/oracle_effect/conditions.rs    | 36 ++++++++++++---
+ .../engine/src/parser/oracle_effect/tests.rs  | 45 +++++++++++++++++++
+ 2 files changed, 76 insertions(+), 5 deletions(-)
+
+diff --git a/crates/engine/src/parser/oracle_effect/conditions.rs b/crates/engine/src/parser/oracle_effect/conditions.rs
+index d5b3779c8c..3265262a10 100644
+--- a/crates/engine/src/parser/oracle_effect/conditions.rs
++++ b/crates/engine/src/parser/oracle_effect/conditions.rs
+@@ -11,7 +11,7 @@ use nom::Parser;
+ use super::super::oracle_nom::bridge::{nom_on_lower, nom_parse_lower};
+ use super::super::oracle_nom::condition as nom_condition;
+ use super::super::oracle_nom::condition::{
+-    inject_controller_you, parse_cast_using_teamwork_phrase,
++    inject_controller_you, parse_cast_using_teamwork_phrase, parse_havent,
+     parse_scoped_player_opponent_and_has_condition, parse_spell_target_superlative_suffix,
+     parse_you_put_onto_battlefield_this_way_clause, parse_zone_changed_this_way_clause,
+     DamagedThisWayRecipient,
+@@ -8973,13 +8973,39 @@ fn parse_activation_count_clause(
+     Ok((rest, (AbilityUseTally::Activated, comparator, n)))
+ }
+ 
+-/// CR 608.2c: the two printed templates for
++/// CR 608.2c: "you haven't added mana with this ability this turn" (Carpet of
++/// Flowers).
++///
++/// The NEGATIVE reading of the resolution tally — zero resolutions — rather
++/// than a mana-specific ledger. `GameEvent::ManaAdded` carries only `source_id`
++/// and no `ability_index`, so mana cannot be attributed to a printed ability at
++/// all; the tally is the only slot that can answer "this ability, this turn".
++/// The precision gap is empty on the card that prints this: the ability requires
++/// a target opponent (CR 601.2c) and adds X mana where X is that opponent's
++/// Island count, so a resolution that occurs always adds mana.
++///
++/// `LT 1` rather than `EQ 0` because `n` is a `u32` on the variant and zero is
++/// not in the comparison vocabulary the siblings use.
++fn parse_haven_added_mana_clause(
++    input: &str,
++) -> OracleResult<'_, (AbilityUseTally, Comparator, u32)> {
++    let (rest, _) = tag("you ").parse(input)?;
++    let (rest, _) = parse_havent(rest)?;
++    let (rest, _) = tag(" added mana with this ability this turn").parse(rest)?;
++    Ok((rest, (AbilityUseTally::Resolved, Comparator::LT, 1)))
++}
++
++/// CR 608.2c: the three printed templates for
+ /// [`AbilityCondition::AbilityUseCountThisTurn`] — how many times THIS ability
+ /// has resolved, or been activated, so far this turn.
+ fn parse_ability_use_count_condition(lower: &str) -> Option<(AbilityUseTally, Comparator, u32)> {
+-    let (rest, parsed) = alt((parse_nth_resolution_clause, parse_activation_count_clause))
+-        .parse(lower)
+-        .ok()?;
++    let (rest, parsed) = alt((
++        parse_nth_resolution_clause,
++        parse_activation_count_clause,
++        parse_haven_added_mana_clause,
++    ))
++    .parse(lower)
++    .ok()?;
+     // Both templates are whole-clause conditions; a leftover tail means the
+     // fragment was something else that merely shares a prefix.
+     if rest.trim_end_matches('.').trim().is_empty() {
+diff --git a/crates/engine/src/parser/oracle_effect/tests.rs b/crates/engine/src/parser/oracle_effect/tests.rs
+index ba6a693ee7..a1b0b40272 100644
+--- a/crates/engine/src/parser/oracle_effect/tests.rs
++++ b/crates/engine/src/parser/oracle_effect/tests.rs
+@@ -53233,6 +53233,51 @@ fn veil_of_summer_effect_chain_parses_supported_clauses() {
+     )));
+ }
+ 
++// CR 608.2c: Carpet of Flowers — "if you haven't added mana with this ability
++// this turn" is the NEGATIVE reading of the same per-ability resolution tally:
++// the ability has resolved zero times this turn.
++//
++// The tally is the right slot rather than a new "produced mana" ledger:
++// `GameEvent::ManaAdded` carries only `source_id` and no `ability_index`, so
++// mana cannot be attributed to a printed ability at all. The precision gap is
++// also empty for this card — the ability requires a target opponent (CR 601.2c)
++// and produces X mana where X is that opponent's Island count, so a resolution
++// that happens always adds mana.
++
++#[test]
++fn haven_added_mana_with_this_ability_this_turn() {
++    let result = try_nom_condition_as_ability_condition(
++        "you haven't added mana with this ability this turn",
++        &mut ParseContext::default(),
++    );
++    assert_eq!(
++        result,
++        Some(AbilityCondition::AbilityUseCountThisTurn {
++            tally: AbilityUseTally::Resolved,
++            comparator: Comparator::LT,
++            n: 1,
++        })
++    );
++}
++
++#[test]
++fn haven_added_mana_accepts_the_typographic_apostrophe() {
++    // The parser's `parse_havent` accepts U+2019; the condition reading must
++    // survive the same normalization as every other "haven't" clause.
++    let result = try_nom_condition_as_ability_condition(
++        "you haven\u{2019}t added mana with this ability this turn",
++        &mut ParseContext::default(),
++    );
++    assert_eq!(
++        result,
++        Some(AbilityCondition::AbilityUseCountThisTurn {
++            tally: AbilityUseTally::Resolved,
++            comparator: Comparator::LT,
++            n: 1,
++        })
++    );
++}
++
+ // CR 603.4: Parser arms for `AbilityCondition::AbilityUseCountThisTurn`.
+ // Covers Omnath / Ashling / Nissa / Sephiroth / Teething Wurmlet class.
+ 

@@ -6,6 +6,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 phase.rs is a Magic: The Gathering game engine written in Rust (compiling to native + WASM) with a React/TypeScript frontend. It implements MTG game rules using functional architecture (discriminated unions, pure reducers, immutable state) with an Arena-quality browser UI. Card data is sourced from MTGJSON (MIT-licensed) with custom typed JSON ability definitions.
 
+## Local Patches — this fork carries changes upstream does not have
+
+This fork (`haowen1993/phase-rs-who`) is downstream of `phase-rs/phase` and adds features upstream has not shipped. Those changes live in **`patches/<name>/`**: a patch series plus a README covering what it does, how to re-apply it after an upstream update, and when it can be deleted.
+
+**Before concluding that unfamiliar code is wrong, check whether a patch put it there.** Read `patches/*/README.md`. A patch-driven deviation from upstream conventions is intentional and reviewed, not drift to be "fixed":
+
+- Do not revert, re-architect, or "clean up" patch-introduced code as if it were a mistake. If you believe a patch is wrong, say so and leave the decision to its author — the patch exists because the behaviour is wanted here.
+- Do not implement the same feature a second time upstream-style alongside a patch. Extend the patch series in a new commit and regenerate the patches **scoped to the tree the patch touches** — never to the whole repo:
+  `git format-patch main..HEAD --no-signature --output-directory patches/<name> -- client/`
+  An unscoped series picks up `patches/` itself, so each re-application re-adds the patch text and the series grows every round. It also drags in repo-level docs and tooling, mixing unrelated churn into a change whose whole value is re-applying cleanly onto a rebased upstream. The cost is that a repo-root fix (e.g. a `.gitignore` entry for a local build artifact) will not travel with the series; add such fixes to the fork's own tooling commit instead of a patch.
+- Two series touching the same directory need explicit excludes rather than a shared path filter, or each claims the other's commits. Verify by applying the series to a clean checkout, not by reading the patch files.
+- `main` is the fork's upstream-synchronisation point and stays free of patch commits, so `git checkout main && git pull` always works and a whole patch is dropped by deleting its branch. Keep patch work on its own branch.
+
+**After changing a parser or an engine type, rebuild the engine WASM** (`./scripts/build-wasm.sh`) before checking the browser. The card database is loaded at runtime but the engine that parses it is compiled into the WASM, so a type change ships a mismatch that no Rust test can see: the app fails at startup with `Failed to parse card database: <Type>: unknown variant <Variant>`. `scripts/check-protocol-version.mjs` compares version constants, not serialized shapes, so it does not catch this.
+
+Active patches:
+
+- **`patches/zhs-card-art/`** — native Simplified-Chinese card art (`zhs`), which the upstream locale pipeline cannot serve because Scryfall has no Simplified-Chinese printings at all. It is a *derived* locale: the art URL is computed from the English printing id the app already holds, so localization needs no generated sidecar. It additionally ships a measured per-printing **availability** sidecar (a CDN localizes community art per printing, with no derivable rule), which the build must generate — see the patch README. This also makes card-art language an independent preference (`preferencesStore.artLanguage`, default `"auto"` = follow the UI language); that separation is deliberate — Chinese has art but no UI catalog, Polish has a UI but no localized art.
+- **`patches/who-channel/`** — narrows this client to a Doctor Who-only channel: card pool scoped to the WHO set, precon catalog scoped to the four WHO precons, and parser support for the WHO cards that blocked them. The README carries the full build recipe, including the card-data steps whose inputs are not tracked.
+
 ## Design Principles — READ THIS FIRST
 
 **Above all else, this project prioritizes three co-equal pillars: idiomatic Rust, composable building-block architecture, and strict fidelity to the MTG Comprehensive Rules. These are non-negotiable and override convenience, speed-of-delivery, or "getting it working." Every code change must pass through all three lenses before anything else.**

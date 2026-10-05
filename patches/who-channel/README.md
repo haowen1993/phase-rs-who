@@ -207,6 +207,25 @@ cd client && npx vitest run --config vitest.integration.config.ts \
 `scripts/check-protocol-version.mjs` 只能发现**协议版本号**漂移，发现不了这个——
 它比的是版本常量，不是序列化形状。
 
+## 重新生成本系列（实测可用的确切命令）
+
+本系列在 **`who-channel` 分支**上生成（与 `patches/zhs-card-art` 分开）：
+
+```bash
+# 在 who-channel 分支上
+git format-patch main..HEAD --no-signature --output-directory patches/who-channel -- . ':(exclude)patches/'
+```
+
+`:(exclude)patches/` 是必须的：系列的输出写进 `patches/`，而生成命令又读它，
+不带排除的话每轮重新生成都会把补丁文本本身再塞进去，系列越滚越大。
+
+**验证**（别只读补丁文件，套到干净检出上试）：
+
+```bash
+git worktree add --detach /tmp/verify <上游提交>
+cd /tmp/verify && git am /path/to/patches/who-channel/*.patch
+```
+
 ## 每次生成后必须做的一件事
 
 `gen-card-data.sh` 会**非幂等重写** `crates/engine/data/oracle-subtypes.json`

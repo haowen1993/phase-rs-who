@@ -203,6 +203,35 @@ Time Wipe           默认 tdc #308（2025）→ 无中文
 重试后仍失败的探测会**单独计数并告警**，不会混进「无中文」——否则一次网络抖动就会让某个
 本来有中文的印刷被永久跳过。
 
+## 重新生成本系列（实测可用的确切命令）
+
+两个补丁系列**放在各自分支**上，每个系列在**自己的分支**上生成，不要用 `main..HEAD` 全量生成：
+
+```bash
+# 在 patches/zhs-card-art 分支上
+git format-patch main..HEAD --no-signature --output-directory patches/zhs-card-art -- \
+  client/ \
+  scripts/gen-derived-art-availability.sh \
+  scripts/lib/probe-derived-art-availability.py \
+  ':(exclude)client/src/viewmodel/keywordProps.ts' \
+  ':(exclude)client/src/viewmodel/__tests__/keywordProps.test.ts' \
+  ':(exclude)client/src/test/fixtures/keyword-payload-wire.json'
+```
+
+**为什么要那三个 exclude**：Replicate 那个提交**同时改 `client/` 和 `crates/`**（一次原子改动：
+引擎放宽费用类型 + 客户端格式化器接受新形状）。它整体属于 `who-channel` 系列，
+所以这里按它拥有的三个客户端文件排除，否则本系列会带上它的**残缺副本**——
+引擎侧在 who-channel、客户端侧在这里，两边都不完整。
+
+**怎么验证分离成功**（别只读补丁文件）：套到干净检出上试。
+
+```bash
+git worktree add --detach /tmp/verify <上游提交>
+cd /tmp/verify && git am /path/to/patches/zhs-card-art/*.patch   # 应全部 Applying，无冲突
+```
+
+再单独对 `patches/who-channel/*.patch` 重复一次（先 `git reset --hard`）。
+
 ## 验证情况
 
 - `cargo fmt --all -- --check` 通过（改动全在 `client/`，Rust 侧零改动，符合预期）

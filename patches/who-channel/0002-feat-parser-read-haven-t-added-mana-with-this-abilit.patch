@@ -1,4 +1,4 @@
-From 06ad0199a93c76a69f87980d07814aaee4c02b37 Mon Sep 17 00:00:00 2001
+From bdf129d6d629b44359311b0a1fd7b6ff24e2cdeb Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 02:55:27 +0800
 Subject: [PATCH 2/3] feat(parser): read "haven't added mana with this ability
@@ -32,7 +32,7 @@ Result: WHO unsupported cards 26 -> 25; Paradox Power precon 2 -> 1.
  2 files changed, 76 insertions(+), 5 deletions(-)
 
 diff --git a/crates/engine/src/parser/oracle_effect/conditions.rs b/crates/engine/src/parser/oracle_effect/conditions.rs
-index d5b3779c8c..3265262a10 100644
+index a6a8b7c7a5..0fcf6d8a5c 100644
 --- a/crates/engine/src/parser/oracle_effect/conditions.rs
 +++ b/crates/engine/src/parser/oracle_effect/conditions.rs
 @@ -11,7 +11,7 @@ use nom::Parser;
@@ -44,7 +44,7 @@ index d5b3779c8c..3265262a10 100644
      parse_scoped_player_opponent_and_has_condition, parse_spell_target_superlative_suffix,
      parse_you_put_onto_battlefield_this_way_clause, parse_zone_changed_this_way_clause,
      DamagedThisWayRecipient,
-@@ -8973,13 +8973,39 @@ fn parse_activation_count_clause(
+@@ -9011,13 +9011,39 @@ fn parse_activation_count_clause(
      Ok((rest, (AbilityUseTally::Activated, comparator, n)))
  }
  
@@ -89,10 +89,10 @@ index d5b3779c8c..3265262a10 100644
      // fragment was something else that merely shares a prefix.
      if rest.trim_end_matches('.').trim().is_empty() {
 diff --git a/crates/engine/src/parser/oracle_effect/tests.rs b/crates/engine/src/parser/oracle_effect/tests.rs
-index ba6a693ee7..a1b0b40272 100644
+index 6cc9ae0a77..24ed965dd7 100644
 --- a/crates/engine/src/parser/oracle_effect/tests.rs
 +++ b/crates/engine/src/parser/oracle_effect/tests.rs
-@@ -53233,6 +53233,51 @@ fn veil_of_summer_effect_chain_parses_supported_clauses() {
+@@ -53234,6 +53234,51 @@ fn veil_of_summer_effect_chain_parses_supported_clauses() {
      )));
  }
  

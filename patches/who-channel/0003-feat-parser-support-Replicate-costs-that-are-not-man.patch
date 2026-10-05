@@ -1,4 +1,4 @@
-From 3925b9117ae991872de6666600bf4e722680fa67 Mon Sep 17 00:00:00 2001
+From 8cba172c5a2ef26a0cc864d5ec2bf4922938342d Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 05:23:47 +0800
 Subject: [PATCH 3/3] feat(parser): support Replicate costs that are not mana
@@ -40,6 +40,9 @@ The client's keyword-payload golden is regenerated from the engine
 
 Result: WHO unsupported 24 -> 23; Masters of Evil precon is now fully supported.
 ---
+ .../test/fixtures/keyword-payload-wire.json   | 13 +--
+ .../viewmodel/__tests__/keywordProps.test.ts  | 26 ++++++
+ client/src/viewmodel/keywordProps.ts          | 33 ++++++--
  crates/engine/src/database/synthesis.rs       | 39 +++++----
  crates/engine/src/game/casting_costs.rs       | 10 +--
  crates/engine/src/game/triggers.rs            |  4 +-
@@ -48,8 +51,125 @@ Result: WHO unsupported 24 -> 23; Masters of Evil precon is now fully supported.
  .../src/parser/oracle_static/keyword_grant.rs |  9 +-
  .../engine/src/parser/oracle_static/tests.rs  |  4 +-
  crates/engine/src/types/keywords.rs           | 25 ++++--
- 8 files changed, 192 insertions(+), 29 deletions(-)
+ 11 files changed, 252 insertions(+), 41 deletions(-)
 
+diff --git a/client/src/test/fixtures/keyword-payload-wire.json b/client/src/test/fixtures/keyword-payload-wire.json
+index aef6bceef9..cb1e56f03e 100644
+--- a/client/src/test/fixtures/keyword-payload-wire.json
++++ b/client/src/test/fixtures/keyword-payload-wire.json
+@@ -834,11 +834,14 @@
+     },
+     {
+       "Replicate": {
+-        "generic": 2,
+-        "shards": [
+-          "Red"
+-        ],
+-        "type": "Cost"
++        "cost": {
++          "generic": 2,
++          "shards": [
++            "Red"
++          ],
++          "type": "Cost"
++        },
++        "type": "Mana"
+       }
+     },
+     {
+diff --git a/client/src/viewmodel/__tests__/keywordProps.test.ts b/client/src/viewmodel/__tests__/keywordProps.test.ts
+index 3579dc197f..9895369304 100644
+--- a/client/src/viewmodel/__tests__/keywordProps.test.ts
++++ b/client/src/viewmodel/__tests__/keywordProps.test.ts
+@@ -56,6 +56,32 @@ describe("getKeywordDetail", () => {
+     expect(getKeywordDetail("Haste")).toBeNull();
+   });
+ 
++  // Regression: `Keyword::Replicate` holds a bare `AbilityCost`, whose serde is
++  // internally tagged — `{ type: "Mana", cost: {...} }` / `{ type:
++  // "TapCreatures", ... }`. The sibling cost enums (FlashbackCost, BlitzCost,
++  // BestowCost) are adjacently tagged and carry their payload under `data`
++  // instead, so the formatter has to read BOTH keys. Reading only `data` made
++  // every replicate cost render as `undefined`.
++  it("formats a bare AbilityCost payload (internally-tagged serde)", () => {
++    expect(
++      getKeywordDetail({ Replicate: { type: "Mana", cost: { type: "Cost", shards: ["Red"], generic: 2 } } }),
++    ).toBe("{2}{R}");
++    // A non-mana replicate cost (Exterminate!) has no client-side detail text:
++    // `formatKnownCost` deliberately has no `TapCreatures` arm, because rendering
++    // it would mean the frontend parsing the cost AST — the engine owns cost
++    // text. `null` renders the keyword with no detail, not a broken label. The
++    // mana arm above is the regression this test exists for.
++    expect(
++      getKeywordDetail({
++        Replicate: {
++          type: "TapCreatures",
++          requirement: { requirement: "count", count: 1 },
++          filter: { type: "Typed", type_filters: [{ Subtype: "Dalek" }], controller: "You", properties: [] },
++        },
++      }),
++    ).toBeNull();
++  });
++
+   it("formats ManaCost params (internally-tagged serde)", () => {
+     expect(getKeywordDetail({ Equip: { type: "Cost", shards: ["White"], generic: 2 } })).toBe("{2}{W}");
+     expect(getKeywordDetail({ Kicker: { type: "Cost", shards: [], generic: 4 } })).toBe("{4}");
+diff --git a/client/src/viewmodel/keywordProps.ts b/client/src/viewmodel/keywordProps.ts
+index e6211634f4..98b4e4ee34 100644
+--- a/client/src/viewmodel/keywordProps.ts
++++ b/client/src/viewmodel/keywordProps.ts
+@@ -343,25 +343,44 @@ const MANA_COST_KEYWORDS = new Set([
+   "Harmonize", "Foretell", "Mutate", "Disturb", "Overload",
+   "Spectacle", "Surge", "Encore", "Entwine", "Outlast", "Scavenge", "Fortify",
+   "Plot", "Offspring", "LevelUp", "Warp", "Sneak", "WebSlinging", "Squad",
+-  "Transmute", "Transfigure", "Recover", "Cleave", "Replicate",
++  "Transmute", "Transfigure", "Recover", "Cleave",
+   "MoreThanMeetsTheEye", "Freerunning", "Specialize",
+ ]);
+ 
+ /**
+- * Keywords whose payload is a `{ type: "Mana", data: ManaCost }` or
+- * `{ type: "NonMana", data: AbilityCost }` cost (FlashbackCost and siblings).
++ * Keywords whose payload is a mana cost or a non-mana cost, tagged
++ * `{ type, data }` for the sibling cost enums (FlashbackCost and friends) and
++ * `{ type, cost }` for a bare `AbilityCost`.
++ *
++ * `Replicate` is in this group rather than `MANA_COST_KEYWORDS` because a
++ * replicate cost is not always mana — Exterminate! prints
++ * "Replicate—Tap an untapped Dalek you control", which is an
++ * `AbilityCost::TapCreatures`.
+  */
+ const MANA_OR_NON_MANA_COST_KEYWORDS = new Set([
+   "Bestow", "Embalm", "Eternalize", "Cycling", "Flashback", "Escape", "Evoke",
+-  "Buyback", "Echo", "Blitz",
++  "Buyback", "Echo", "Blitz", "Replicate",
+ ]);
+ 
+ /** Keywords whose payload is an AbilityCost. */
+ const ABILITY_COST_KEYWORDS = new Set(["CumulativeUpkeep", "Escalate"]);
+ 
+-function formatManaOrNonManaCost(val: { type: string; data: unknown }): string | null {
+-  if (val.type === "Mana") return formatKeywordManaCost(val.data as ManaCost);
+-  return formatKeywordAbilityCost(val.data as KeywordAbilityCost);
++/**
++ * The cost payload sits under `data` for the adjacent-tagged sibling enums
++ * (FlashbackCost, BlitzCost, BestowCost, CyclingCost) but under `cost` for a
++ * bare `AbilityCost`, whose serde is internally tagged
++ * (`{ type: "Mana", cost: {...} }`). `Keyword::Replicate` is the latter, so both
++ * keys are read; reading only `data` rendered every replicate cost blank.
++ */
++function formatManaOrNonManaCost(val: {
++  type: string;
++  data?: unknown;
++  cost?: unknown;
++}): string | null {
++  const payload = val.data ?? val.cost;
++  if (payload == null) return null;
++  if (val.type === "Mana") return formatKeywordManaCost(payload as ManaCost);
++  return formatKeywordAbilityCost(payload as KeywordAbilityCost);
+ }
+ 
+ type KeywordAbilityCost = Parameters<typeof formatKnownCost>[0];
 diff --git a/crates/engine/src/database/synthesis.rs b/crates/engine/src/database/synthesis.rs
 index 2403ab673b..a9cd6cfb2f 100644
 --- a/crates/engine/src/database/synthesis.rs
@@ -125,7 +245,7 @@ index 2403ab673b..a9cd6cfb2f 100644
              ],
              ..CardFace::default()
 diff --git a/crates/engine/src/game/casting_costs.rs b/crates/engine/src/game/casting_costs.rs
-index 82911f7035..9fe96bf3e9 100644
+index 32ed94808b..dc20ce99fa 100644
 --- a/crates/engine/src/game/casting_costs.rs
 +++ b/crates/engine/src/game/casting_costs.rs
 @@ -10746,11 +10746,7 @@ pub(super) fn effective_replicate_additional_cost_instances(
@@ -141,7 +261,7 @@ index 82911f7035..9fe96bf3e9 100644
              AdditionalCostInstance::new_with_ordinal(
                  AdditionalCostOrigin::Replicate,
                  u32::try_from(ordinal).unwrap_or(u32::MAX),
-@@ -25756,7 +25752,9 @@ its replicate cost was paid.)\nDraw a card.";
+@@ -25763,7 +25759,9 @@ its replicate cost was paid.)\nDraw a card.";
              generic: 1,
          };
          StaticDefinition::new(StaticMode::CastWithKeyword {
@@ -153,10 +273,10 @@ index 82911f7035..9fe96bf3e9 100644
          .affected(TargetFilter::Typed(
              TypedFilter::new(TypeFilter::Instant).controller(ControllerRef::You),
 diff --git a/crates/engine/src/game/triggers.rs b/crates/engine/src/game/triggers.rs
-index 52ed349498..02a1f062fd 100644
+index 1d3a1fc424..d92a3627ad 100644
 --- a/crates/engine/src/game/triggers.rs
 +++ b/crates/engine/src/game/triggers.rs
-@@ -37716,7 +37716,9 @@ pub mod tests {
+@@ -37859,7 +37859,9 @@ pub mod tests {
              Zone::Battlefield,
          );
          let grant = StaticDefinition::new(StaticMode::CastWithKeyword {
@@ -341,7 +461,7 @@ index 25f02a3845..b1219d22e4 100644
      fn parse_granted_keyword_fragment_ward_pay_life_equal_to_power() {
          assert_eq!(
 diff --git a/crates/engine/src/parser/oracle_static/keyword_grant.rs b/crates/engine/src/parser/oracle_static/keyword_grant.rs
-index 604af4b60e..7beb6f6323 100644
+index 6e35d0838c..baf0d77e8e 100644
 --- a/crates/engine/src/parser/oracle_static/keyword_grant.rs
 +++ b/crates/engine/src/parser/oracle_static/keyword_grant.rs
 @@ -255,7 +255,14 @@ fn parse_granted_self_cost_keyword(keyword_str: &str) -> Option<Keyword> {
@@ -361,10 +481,10 @@ index 604af4b60e..7beb6f6323 100644
      .into_iter()
      .find_map(|(name, ctor)| {
 diff --git a/crates/engine/src/parser/oracle_static/tests.rs b/crates/engine/src/parser/oracle_static/tests.rs
-index 71735076e5..8bceb5a795 100644
+index 79f9709cb3..6fb17aa013 100644
 --- a/crates/engine/src/parser/oracle_static/tests.rs
 +++ b/crates/engine/src/parser/oracle_static/tests.rs
-@@ -13564,7 +13564,9 @@ fn static_grant_replicate_hatchery_sliver() {
+@@ -13678,7 +13678,9 @@ fn static_grant_replicate_hatchery_sliver() {
      assert_eq!(
          def.mode,
          StaticMode::CastWithKeyword {

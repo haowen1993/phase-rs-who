@@ -1617,7 +1617,7 @@ pub(crate) fn enter_with_counters_for_object(
 /// [`enter_with_counters_for_object`] for the why.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
-pub(crate) enum EnterCounterSpec {
+pub enum EnterCounterSpec {
     /// The count has one answer for the whole resolution; already resolved.
     Resolved {
         counter_type: CounterType,

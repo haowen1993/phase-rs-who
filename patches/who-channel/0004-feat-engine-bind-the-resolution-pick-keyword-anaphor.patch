@@ -1,0 +1,1328 @@
+From d31524fe5187724f41749ece70a4b470a369240d Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 21:21:47 +0800
+Subject: [PATCH 4/5] feat(engine): bind the resolution-pick keyword anaphor to
+ the exiled tracked set
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+"Exile a card from your hand with a number of time counters on it equal to
+its mana value. If it doesn't have suspend, it gains suspend." (The
+Eleventh Doctor, Amy's Home) strict-failed to `Effect::Unimplemented`
+because the pick is an untargeted choice made while the ability resolves
+(CR 608.2d): it reaches neither the grant condition's subject nor
+`ResolvedAbility.targets`, so the gate could only fall through to its
+`TriggeringSource` fallback — the Doctor itself.
+
+Both halves of the clause are now re-anchored onto the tracked set the pick
+publishes, with the keyword test folded into the set selector:
+`TrackedSetFiltered { filter: <no suspend>, caused_by: Exiled }`. That is
+Forge's `Card.IsRemembered+withoutSuspend` composition expressed with this
+engine's existing parts, and it expresses "the cards exiled this way that
+don't have suspend" as ONE per-member selector, so no separate condition is
+left to misbind and no printed `Suspend N—{cost}` can be clobbered to {0}.
+
+Three seams had to carry that shape:
+
+  * `publish_effect_zone_choice_tracked_set` stamps the producer action.
+    An INTERACTIVE exile publishes through the choice-completion seam, not
+    through `publish_tracked_set_for_resolution`'s event-derived arm, so
+    nothing wrote `tracked_set_member_causes` and a `caused_by: Exiled`
+    selector matched nothing. The cause is derived from the destination
+    through the same `this_way_cause_for_zone` authority the completion
+    seam already stamps `EffectResolutionResult.cause` with.
+  * `GenericEffect`'s broadcast arm enumerates a tracked-set filter's
+    members. It scanned only the battlefield, so a set of exiled cards was
+    unreachable however it was selected.
+  * Entry counters split by answerability. `enter_with_counters` was
+    resolved at resolver entry with `recipient: None`, so an
+    `ObjectScope::Recipient` count walked its fallback ladder down to the
+    ability SOURCE and stamped the SOURCE's mana value — the chosen MV-3
+    card entered exile with 0 time counters. Counts that do not read the
+    moved object stay eagerly resolved; only those that do are carried as
+    `EnterCounterSpec::PerObject` and answered per object by
+    `enter_with_counters_for_object`.
+
+Measured: the chosen card enters exile with 3 time counters and gains
+suspend; a card with printed `Suspend 4—{U}` keeps its parameters. The
+other three binding classes (declared stack target, injected target,
+trigger source) are pinned unchanged.
+
+23218 engine unit tests pass (`game::casting::tests::witherbloom_…` fails
+on this fork's 362-card WHO pool and predates this change), 103
+`effects::change_zone`, 2706 `effects::` + `engine_resolution_choices::`,
+and 13 `keyword_anaphor_subject_binding` integration tests.
+---
+ .../engine/src/game/effects/cast_from_zone.rs |  22 +-
+ crates/engine/src/game/effects/change_zone.rs | 251 +++++++++++++-----
+ crates/engine/src/game/effects/effect.rs      |  34 ++-
+ crates/engine/src/game/effects/mod.rs         |  20 +-
+ .../src/game/engine_resolution_choices.rs     |  68 ++++-
+ crates/engine/src/parser/oracle_effect/mod.rs | 171 ++++++++++--
+ .../engine/src/parser/oracle_effect/tests.rs  | 102 +++++--
+ crates/engine/src/types/game_state.rs         |  19 +-
+ .../keyword_anaphor_subject_binding.rs        | 185 ++++++-------
+ 9 files changed, 641 insertions(+), 231 deletions(-)
+
+diff --git a/crates/engine/src/game/effects/cast_from_zone.rs b/crates/engine/src/game/effects/cast_from_zone.rs
+index b701fd94fc..b825dd7387 100644
+--- a/crates/engine/src/game/effects/cast_from_zone.rs
++++ b/crates/engine/src/game/effects/cast_from_zone.rs
+@@ -2001,19 +2001,23 @@ pub(crate) fn graveyard_exile_rider_entry_counters(
+     };
+     let mut rider = sub.clone();
+     rider.targets = vec![TargetRef::Object(obj_id)];
+-    let base: Vec<(crate::types::counter::CounterType, u32)> = enter_with_counters
+-        .iter()
+-        .map(|(counter_type, quantity)| {
+-            let n = crate::game::quantity::resolve_quantity_with_targets(state, quantity, &rider)
+-                .max(0) as u32;
+-            (counter_type.clone(), n)
+-        })
+-        .collect();
++    // CR 608.2c: TWO reference axes have to be bound for this rider's counts, and
++    // they are independent:
++    //   * `ObjectScope::Target` ("with X time counters on it, where X is its mana
++    //     value", `QuantityRef::ObjectManaValue { Target }`) reads the ability's
++    //     first object target, which the clone above supplies — a sub-ability
++    //     starts with no targets of its own.
++    //   * `ObjectScope::Recipient` reads the object the counters are landing on,
++    //     which `change_zone::enter_with_counters_for_object` binds from the
++    //     `obj_id` it is handed.
++    // The second axis is why the counts are no longer resolved here: the shared
++    // authority resolves every expression per moved object, so this function hands
++    // it the printed expressions rather than pre-baked numbers.
+     super::change_zone::enter_with_counters_for_object(
+         state,
+         &rider,
+         obj_id,
+-        &base,
++        &super::change_zone::resolve_enter_counter_specs(state, &rider, enter_with_counters),
+         conditional_enter_with_counters,
+     )
+ }
+diff --git a/crates/engine/src/game/effects/change_zone.rs b/crates/engine/src/game/effects/change_zone.rs
+index 5867f99357..4a0d51a429 100644
+--- a/crates/engine/src/game/effects/change_zone.rs
++++ b/crates/engine/src/game/effects/change_zone.rs
+@@ -677,19 +677,13 @@ pub fn resolve(
+             enters_modified_if,
+             ..
+         } => {
+-            // CR 122.1 + CR 614.1c: Resolve `QuantityExpr` counts to concrete
+-            // u32 values up front so the zone-move pipeline carries fully-
+-            // resolved counts (matches the Token resolver pattern at
+-            // `effects/token.rs:400`).
+-            let resolved_counters: Vec<(CounterType, u32)> = enter_with_counters
+-                .iter()
+-                .map(|(ct, qty)| {
+-                    let n =
+-                        crate::game::quantity::resolve_quantity_with_targets(state, qty, ability)
+-                            .max(0) as u32;
+-                    (ct.clone(), n)
+-                })
+-                .collect();
++            // CR 122.1 + CR 614.1c + CR 608.2c: Split the entry counters by
++            // answerability. Everything that does not read the moved object is
++            // resolved now, exactly as before; only an `ObjectScope::Recipient`
++            // count ("a number of time counters on it equal to its mana value")
++            // is carried as an expression, because its referent does not exist
++            // until a resolution-time pick is answered.
++            let counters = resolve_enter_counter_specs(state, ability, enter_with_counters);
+             // CR 110.2a: Resolve the controller-override `ControllerRef` to a
+             // concrete `PlayerId` exactly once at resolver entry, then carry
+             // the resolved `Option<PlayerId>` through the iteration ctx and
+@@ -710,7 +704,7 @@ pub fn resolve(
+                 *enter_tapped,
+                 *enters_attacking,
+                 *up_to,
+-                resolved_counters,
++                counters,
+                 conditional_enter_with_counters.clone(),
+                 face_down_profile.clone(),
+                 enters_modified_if.clone(),
+@@ -1352,26 +1346,21 @@ pub fn resolve(
+                     .get(obj_id)
+                     .is_some_and(|object| object.zone == dest_zone)
+         };
+-        let per_obj_ctx = ChangeZoneIterationCtx {
+-            enter_with_counters: enter_with_counters_for_object(
+-                state,
+-                ability,
+-                *obj_id,
+-                &effect_enter_with_counters,
+-                &effect_conditional_enter_with_counters,
+-            ),
+-            ..ctx.clone()
+-        };
++        // CR 122.1 + CR 608.2c: no per-object ctx is built here. The shared ctx
++        // already carries the printed counter EXPRESSIONS, and
++        // `process_one_zone_move_with_terminal` resolves them with this object
++        // bound as the `ObjectScope::Recipient` — the one seam that knows which
++        // object is moving.
+         let anticipated_pause = anticipated_zone_change_delivery(
+             state,
+             *obj_id,
+-            per_obj_ctx.destination,
+-            per_obj_ctx.source_id,
+-            per_obj_ctx.face_down_in_exile,
++            ctx.destination,
++            ctx.source_id,
++            ctx.face_down_in_exile,
+         );
+         let delivery_start = events.len();
+         let stack_depth_before_zone_move = state.resolution_stack.capture_child_boundary();
+-        match process_one_zone_move_with_terminal(state, &per_obj_ctx, *obj_id, events) {
++        match process_one_zone_move_with_terminal(state, &ctx, *obj_id, events) {
+             crate::game::zone_pipeline::ZoneMoveTerminalResult::Completed(completion) => {
+                 logical_zone_change_group
+                     .record_delivery_completion(*obj_id, completion)
+@@ -1560,30 +1549,120 @@ pub(crate) fn count_selected_zone_arrivals(
+         .count()
+ }
+ 
+-/// CR 122.1 + CR 614.1c: Merge unconditional and conditional entry-time counters
+-/// for one object about to enter via `ChangeZone`.
++/// CR 122.1 + CR 614.1c + CR 608.2c: The complete entry-counter set for ONE
++/// object about to enter via `ChangeZone` — the unconditional
++/// [`EnterCounterSpec`]s plus any `conditional_enter_with_counters` rider whose
++/// filter the object matches.
++///
++/// The split is by ANSWERABILITY, and it is the whole reason the spec type
++/// exists:
++///
++///   * A count that does not depend on the moved object (the overwhelming
++///     majority: a `Fixed` "enters with two +1/+1 counters", a board count, …)
++///     has one answer for the whole resolution, so it is resolved ONCE at
++///     resolver entry and carried as a plain number. That keeps the
++///     pause/resume carriers free of ability plumbing and keeps every existing
++///     card byte-identical.
++///   * A count whose expression reads `ObjectScope::Recipient` ("a number of
++///     time counters on it equal to its mana value" — The Eleventh Doctor,
++///     Amy's Home) names the object being moved, which for a resolution-time
++///     pick does not exist until the player answers the prompt. Resolving it
++///     early is not merely premature, it is unanswerable: `ObjectScope::
++///     Recipient`'s fallback ladder (`game/quantity.rs`, `object_for_scope`)
++///     walks recipient → first object target (empty for an untargeted pick) →
++///     `ctx.entering` (unset outside an ETB replacement) → the ability SOURCE,
++///     so the count silently becomes the SOURCE's mana value. Such a count is
++///     therefore carried UNRESOLVED and answered here, per object.
+ pub(crate) fn enter_with_counters_for_object(
+     state: &GameState,
+     ability: &ResolvedAbility,
+     obj_id: ObjectId,
+-    base: &[(CounterType, u32)],
++    base: &[EnterCounterSpec],
+     conditional: &[(TargetFilter, CounterType, QuantityExpr)],
+ ) -> Vec<(CounterType, u32)> {
+-    let mut counters = base.to_vec();
++    let mut counters: Vec<(CounterType, u32)> = base
++        .iter()
++        .map(|spec| match spec {
++            EnterCounterSpec::Resolved {
++                counter_type,
++                count,
++            } => (counter_type.clone(), *count),
++            EnterCounterSpec::PerObject { counter_type, expr } => (
++                counter_type.clone(),
++                crate::game::quantity::resolve_quantity_with_targets_and_recipient(
++                    state, expr, ability, obj_id,
++                )
++                .max(0) as u32,
++            ),
++        })
++        .collect();
+     if conditional.is_empty() {
+         return counters;
+     }
+     let ctx = crate::game::filter::FilterContext::from_ability(ability);
+     for (filter, counter_type, count) in conditional {
+         if crate::game::filter::matches_target_filter(state, obj_id, filter, &ctx) {
+-            let n = crate::game::quantity::resolve_quantity_with_targets(state, count, ability)
+-                .max(0) as u32;
++            let n = crate::game::quantity::resolve_quantity_with_targets_and_recipient(
++                state, count, ability, obj_id,
++            )
++            .max(0) as u32;
+             counters.push((counter_type.clone(), n));
+         }
+     }
+     counters
+ }
+ 
++/// CR 122.1 + CR 614.1c: One unconditional entry-counter spec, split by whether
++/// its count is answerable before the moved object is known. See
++/// [`enter_with_counters_for_object`] for the why.
++#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
++#[serde(tag = "type")]
++pub(crate) enum EnterCounterSpec {
++    /// The count has one answer for the whole resolution; already resolved.
++    Resolved {
++        counter_type: CounterType,
++        count: u32,
++    },
++    /// The count reads `ObjectScope::Recipient`, so it is answered per moved
++    /// object.
++    PerObject {
++        counter_type: CounterType,
++        expr: QuantityExpr,
++    },
++}
++
++/// CR 122.1 + CR 614.1c + CR 608.2c: Lower `Effect::ChangeZone`'s printed
++/// entry-counter expressions into [`EnterCounterSpec`]s — resolving everything
++/// that does not read the moved object, and deferring everything that does.
++/// Single authority for the split, so the single-object arm, the mass arm and
++/// the `EffectZoneChoice` carrier cannot disagree about which counts are
++/// per-object.
++pub(crate) fn resolve_enter_counter_specs(
++    state: &GameState,
++    ability: &ResolvedAbility,
++    enter_with_counters: &[(CounterType, QuantityExpr)],
++) -> Vec<EnterCounterSpec> {
++    enter_with_counters
++        .iter()
++        .map(|(counter_type, expr)| {
++            if crate::game::quantity::quantity_expr_uses_recipient(expr) {
++                EnterCounterSpec::PerObject {
++                    counter_type: counter_type.clone(),
++                    expr: expr.clone(),
++                }
++            } else {
++                EnterCounterSpec::Resolved {
++                    counter_type: counter_type.clone(),
++                    count: crate::game::quantity::resolve_quantity_with_targets(
++                        state, expr, ability,
++                    )
++                    .max(0) as u32,
++                }
++            }
++        })
++        .collect()
++}
++
+ /// Resolve the ability currently driving a `ChangeZone` pause/resume for
+ /// `source_id`, preferring the popped `resolving_stack_entry` over the live stack.
+ pub(crate) fn resolving_stack_ability_for_source(
+@@ -1605,22 +1684,38 @@ pub(crate) fn resolving_stack_ability_for_source(
+         .cloned()
+ }
+ 
+-/// Merge unconditional and conditional entry counters for one object during a
+-/// paused multi-object `ChangeZone` resume.
++/// Entry counters for one object during a paused `ChangeZone` resume.
++/// Counterpart of [`enter_with_counters_for_object`] for the pause/resume path,
++/// where the resolving ability is recovered from the stack object that owns the
++/// resolution (`resolving_stack_ability_for_source`) because the parked frame
++/// carries specs, not the ability.
++///
++/// When no ability is recoverable — a state restored without its stack object,
++/// or a unit-level frame with no backing entry — a [`EnterCounterSpec::Resolved`]
++/// count still carries its own answer and is stamped; a
++/// [`EnterCounterSpec::PerObject`] count has none, and the only alternative to
++/// dropping it would be to resolve its `ObjectScope::Recipient` against a
++/// fallback the player never named. Dropping it is the honest answer, and it is
++/// what this path did before such specs existed.
+ pub(crate) fn enter_with_counters_for_pending_object(
+     state: &GameState,
+     source_id: ObjectId,
+     obj_id: ObjectId,
+-    base: &[(CounterType, u32)],
++    base: &[EnterCounterSpec],
+     conditional: &[(TargetFilter, CounterType, QuantityExpr)],
+ ) -> Vec<(CounterType, u32)> {
+-    if base.is_empty() && conditional.is_empty() {
+-        return vec![];
+-    }
+-    if let Some(ability) = resolving_stack_ability_for_source(state, source_id) {
+-        enter_with_counters_for_object(state, &ability, obj_id, base, conditional)
+-    } else {
+-        base.to_vec()
++    match resolving_stack_ability_for_source(state, source_id) {
++        Some(ability) => enter_with_counters_for_object(state, &ability, obj_id, base, conditional),
++        None => base
++            .iter()
++            .filter_map(|spec| match spec {
++                EnterCounterSpec::Resolved {
++                    counter_type,
++                    count,
++                } => Some((counter_type.clone(), *count)),
++                EnterCounterSpec::PerObject { .. } => None,
++            })
++            .collect(),
+     }
+ }
+ 
+@@ -1643,7 +1738,12 @@ pub(crate) struct ChangeZoneIterationCtx {
+     /// `Effect::ChangeZone.enters_under` at resolver entry.
+     pub enters_under_player: Option<PlayerId>,
+     pub enters_attacking: bool,
+-    pub enter_with_counters: Vec<(CounterType, u32)>,
++    /// CR 122.1 + CR 614.1c + CR 608.2c: Entry-counter specs. Counts that do not
++    /// read the moved object arrive already resolved; the rest stay as
++    /// expressions for [`enter_with_counters_for_object`] to answer per object —
++    /// see that function for why resolving those any earlier answers the wrong
++    /// object.
++    pub enter_with_counters: Vec<EnterCounterSpec>,
+     #[allow(dead_code)]
+     // carried for resume ctx parity; merged into enter_with_counters at move time
+     pub conditional_enter_with_counters: Vec<(TargetFilter, CounterType, QuantityExpr)>,
+@@ -1775,6 +1875,18 @@ pub(crate) fn process_one_zone_move_with_terminal(
+         ctx.enters_attacking,
+         ctx.enters_modified_if.as_ref(),
+     );
++    // CR 122.1 + CR 614.1c + CR 608.2c: resolve THIS object's entry counters
++    // here, at the one seam that knows which object is moving. The ctx carries
++    // the printed expressions rather than counts, because a
++    // `ObjectScope::Recipient` count names the object being moved and that is
++    // only knowable now — see `enter_with_counters_for_object`.
++    let enter_with_counters = enter_with_counters_for_pending_object(
++        state,
++        ctx.source_id,
++        obj_id,
++        &ctx.enter_with_counters,
++        &ctx.conditional_enter_with_counters,
++    );
+     let result = crate::game::zone_pipeline::execute_zone_move_with_terminal_and_controller(
+         state,
+         obj_id,
+@@ -1786,7 +1898,7 @@ pub(crate) fn process_one_zone_move_with_terminal(
+         eff_tapped,
+         eff_attacking,
+         ctx.enters_under_player,
+-        &ctx.enter_with_counters,
++        &enter_with_counters,
+         ctx.face_down_profile.as_ref(),
+         ctx.face_down_in_exile,
+         ctx.track_exiled_by_source,
+@@ -1971,19 +2083,11 @@ pub fn resolve_all(
+             random_order,
+         } => {
+             let scan_zones = change_zone_all_origin_zones(state, *origin, target);
+-            // CR 122.1 + CR 122.1h: Resolve each `QuantityExpr` counter count
+-            // to a concrete u32 once, mirroring the single-object `ChangeZone`
+-            // arm. Every entering object receives these counters (e.g. a
+-            // finality counter on Shilgengar's mass return).
+-            let resolved_counters: Vec<(CounterType, u32)> = enter_with_counters
+-                .iter()
+-                .map(|(ct, qty)| {
+-                    let n =
+-                        crate::game::quantity::resolve_quantity_with_targets(state, qty, ability)
+-                            .max(0) as u32;
+-                    (ct.clone(), n)
+-                })
+-                .collect();
++            // CR 122.1 + CR 122.1h + CR 608.2c: Same answerability split as the
++            // single-object arm — a `Fixed` count (Shilgengar's finality counter)
++            // resolves once here, only a recipient-reading count defers.
++            let resolved_counters =
++                resolve_enter_counter_specs(state, ability, enter_with_counters);
+             (
+                 scan_zones,
+                 *destination,
+@@ -2310,7 +2414,11 @@ pub fn resolve_all(
+             enter_tapped,
+             enters_attacking,
+             enters_under_player,
+-            &enter_with_counters,
++            // CR 122.1 + CR 608.2c: resolve THIS object's counters with itself
++            // bound as the recipient (see `enter_with_counters_for_object`).
++            // `Effect::ChangeZoneAll` prints no conditional rider, so there is
++            // none to pass.
++            &enter_with_counters_for_object(state, ability, obj_id, &enter_with_counters, &[]),
+             face_down_profile.as_ref(),
+             ability.context.face_down_in_exile,
+             track_exiled_by_source,
+@@ -3110,6 +3218,29 @@ mod tests {
+                 ObjectId(100),
+                 PlayerId(0),
+             );
++            // Production resolution pops the stack entry into
++            // `resolving_stack_entry` before the effect runs
++            // (`effects::drain_pending_change_zone_iteration` relies on it to
++            // recover the resolving ability for per-object entry counters). A
++            // bare `resolve()` call has no such entry, and the conditional rider
++            // would be dropped for want of an ability to evaluate its filter
++            // with. Mirror production rather than weakening the lookup.
++            state.resolving_stack_entry = Some(StackEntry {
++                id: ObjectId(101),
++                controller: PlayerId(0),
++                source_id: ObjectId(100),
++                kind: StackEntryKind::TriggeredAbility {
++                    source_id: ObjectId(100),
++                    ability: Box::new(ability.clone()),
++                    condition: None,
++                    trigger_event: None,
++                    description: None,
++                    source_name: String::new(),
++                    subject_match_count: None,
++                    die_result: None,
++                    provenance: None,
++                },
++            });
+             let mut events = Vec::new();
+             resolve(&mut state, &ability, &mut events).unwrap();
+             assert!(state.battlefield.contains(&entering));
+diff --git a/crates/engine/src/game/effects/effect.rs b/crates/engine/src/game/effects/effect.rs
+index 94ce090952..bfa4a38e75 100644
+--- a/crates/engine/src/game/effects/effect.rs
++++ b/crates/engine/src/game/effects/effect.rs
+@@ -849,15 +849,35 @@ fn register_transient_effect(
+             }
+             let filter = crate::game::effects::resolved_object_filter(state, ability, filter);
+             let filter = crate::game::targeting::resolve_tracked_set_sentinel(state, filter);
+-            // Broadcast filter: find matching objects at resolution time and bind each.
+             // CR 107.3a + CR 601.2b: ability-context filter evaluation.
+             let ctx = filter::FilterContext::from_ability(ability);
+-            let matching: Vec<ObjectId> = state
+-                .battlefield
+-                .iter()
+-                .filter(|obj_id| filter::matches_target_filter(state, **obj_id, &filter, &ctx))
+-                .copied()
+-                .collect();
++            // CR 608.2c + CR 400.7: a filter scoped to a TRACKED SET names a
++            // resolution-local population, not a board population — its members
++            // live wherever the instruction that published them put them, which
++            // for the exiled-card class ("cards exiled this way gain suspend",
++            // The Eleventh Doctor / Amy's Home) is the exile zone the
++            // battlefield broadcast below can never scan. Enumerate the SET and
++            // test each member with the same matcher the battlefield path uses,
++            // so set membership, the nested predicate, and the `caused_by`
++            // producer-action stamp are all consulted by one authority
++            // (`filter::matches_target_filter`). The tracked-set members are
++            // spelled out here rather than unioned with the battlefield scan:
++            // a set selector is a closed domain, so no non-member can be
++            // reached by accident.
++            let matching: Vec<ObjectId> = if let TargetFilter::TrackedSet { .. }
++            | TargetFilter::TrackedSetFiltered { .. } = filter
++            {
++                crate::game::targeting::resolved_object_ids_for_filter_with_context(
++                    state, ability, &filter, &ctx,
++                )
++            } else {
++                state
++                    .battlefield
++                    .iter()
++                    .filter(|obj_id| filter::matches_target_filter(state, **obj_id, &filter, &ctx))
++                    .copied()
++                    .collect()
++            };
+             for obj_id in matching {
+                 install_transient(
+                     state,
+diff --git a/crates/engine/src/game/effects/mod.rs b/crates/engine/src/game/effects/mod.rs
+index b7db5602f6..1cda100398 100644
+--- a/crates/engine/src/game/effects/mod.rs
++++ b/crates/engine/src/game/effects/mod.rs
+@@ -2169,14 +2169,10 @@ fn drain_pending_change_zone_iteration(state: &mut GameState, events: &mut Vec<G
+         // their observer triggers are collected with earlier pause segments.
+         let events_before_drain = events.len();
+         for (i, obj_id) in remaining.iter().enumerate() {
+-            let per_obj_enter_counters =
+-                crate::game::effects::change_zone::enter_with_counters_for_pending_object(
+-                    state,
+-                    source_id,
+-                    *obj_id,
+-                    &enter_with_counters,
+-                    &conditional_enter_with_counters,
+-                );
++            // CR 122.1 + CR 608.2c: hand the printed counter EXPRESSIONS on; the
++            // per-object resolution happens in
++            // `change_zone::process_one_zone_move_with_terminal`, the one seam
++            // that knows which object is moving.
+             let ctx = crate::game::effects::change_zone::ChangeZoneIterationCtx {
+                 source_id,
+                 controller,
+@@ -2186,8 +2182,12 @@ fn drain_pending_change_zone_iteration(state: &mut GameState, events: &mut Vec<G
+                 enter_tapped,
+                 enters_under_player,
+                 enters_attacking,
+-                enter_with_counters: per_obj_enter_counters,
+-                conditional_enter_with_counters: vec![],
++                enter_with_counters: enter_with_counters.clone(),
++                // CR 614.1c: the conditional riders ride along, so a resumed
++                // member still gets "enters with an additional counter if it's a
++                // Hero" (Winter Soldier Hero through the `EffectZoneChoice`
++                // round-trip).
++                conditional_enter_with_counters: conditional_enter_with_counters.clone(),
+                 duration: duration.clone(),
+                 track_exiled_by_source,
+                 face_down_in_exile,
+diff --git a/crates/engine/src/game/engine_resolution_choices.rs b/crates/engine/src/game/engine_resolution_choices.rs
+index c12f078836..3e76ef7ea4 100644
+--- a/crates/engine/src/game/engine_resolution_choices.rs
++++ b/crates/engine/src/game/engine_resolution_choices.rs
+@@ -88,7 +88,7 @@ fn legacy_mass_library_order_prompt_is_current(
+     enters_attacking: bool,
+     owner_library: bool,
+     face_down_profile: Option<&crate::types::ability::FaceDownProfile>,
+-    enter_with_counters: &[(crate::types::counter::CounterType, u32)],
++    enter_with_counters: &[effects::change_zone::EnterCounterSpec],
+     conditional_enter_with_counters: &[(
+         crate::types::ability::TargetFilter,
+         crate::types::counter::CounterType,
+@@ -6589,6 +6589,7 @@ pub(super) fn handle_resolution_choice(
+                         state,
+                         effect_kind,
+                         &[],
++                        destination,
+                         library_position,
+                         false,
+                     );
+@@ -6757,14 +6758,9 @@ pub(super) fn handle_resolution_choice(
+                             .get(card_id)
+                             .map(|object| object.zone)
+                             .unwrap_or(zone);
+-                        let per_obj_enter_counters =
+-                            effects::change_zone::enter_with_counters_for_pending_object(
+-                                state,
+-                                source_id,
+-                                *card_id,
+-                                &enter_with_counters,
+-                                &conditional_enter_with_counters,
+-                            );
++                        // CR 122.1 + CR 608.2c: hand the counter SPECS on; the
++                        // per-object resolution happens in
++                        // `change_zone::process_one_zone_move_with_terminal`.
+                         let ctx = effects::change_zone::ChangeZoneIterationCtx {
+                             source_id,
+                             controller: player,
+@@ -6774,8 +6770,11 @@ pub(super) fn handle_resolution_choice(
+                             enter_tapped,
+                             enters_under_player,
+                             enters_attacking,
+-                            enter_with_counters: per_obj_enter_counters,
+-                            conditional_enter_with_counters: vec![],
++                            enter_with_counters: enter_with_counters.clone(),
++                            // CR 614.1c: conditional riders ride along, so a
++                            // further pause on this member cannot drop them.
++                            conditional_enter_with_counters: conditional_enter_with_counters
++                                .clone(),
+                             // CR 611.2a + CR 610.3: the duration carried across
+                             // the `EffectZoneChoice` round-trip — an
+                             // "exile ... until ~ leaves the battlefield" move
+@@ -6833,6 +6832,7 @@ pub(super) fn handle_resolution_choice(
+                                     state,
+                                     effect_kind,
+                                     &chosen_ids,
++                                    Some(dest_zone),
+                                     library_position,
+                                     true,
+                                 );
+@@ -6910,6 +6910,7 @@ pub(super) fn handle_resolution_choice(
+                                     state,
+                                     effect_kind,
+                                     &chosen_ids,
++                                    Some(dest_zone),
+                                     library_position,
+                                     true,
+                                 );
+@@ -7523,6 +7524,7 @@ pub(super) fn handle_resolution_choice(
+                     state,
+                     effect_kind,
+                     &tracked,
++                    destination,
+                     library_position,
+                     false,
+                 );
+@@ -8770,10 +8772,24 @@ fn action_result_outcome(
+ /// choice / replacement ordering still open). When false (terminal completion),
+ /// an empty `up_to` selection must rebind a fresh empty chain set so a following
+ /// `TargetFilter::TrackedSet` cannot reuse a prior non-empty set.
++///
++/// `destination`: the resolution's zone destination, carried by
++/// `WaitingFor::EffectZoneChoice`. It supplies the producer-action CAUSE the
++/// published members are stamped with (CR 608.2c), through the single
++/// `effects::this_way_cause_for_zone` authority the completion seam already
++/// uses. Without the stamp an action-bound consumer
++/// (`TrackedSetFiltered { caused_by: Some(Exiled) }`, "the cards exiled this
++/// way") matches nothing after an INTERACTIVE pick, because the members reach
++/// the set through this seam rather than through
++/// `effects::publish_tracked_set_for_resolution`'s event-derived arm — so a card
++/// whose exile is chosen by its controller (The Eleventh Doctor, Amy's Home)
++/// could not reach its own continuation. `None` (non-zone-move effect kinds)
++/// stamps nothing, exactly as before.
+ fn publish_effect_zone_choice_tracked_set(
+     state: &mut GameState,
+     effect_kind: EffectKind,
+     chosen: &[ObjectId],
++    destination: Option<Zone>,
+     library_position: Option<LibraryPosition>,
+     mid_pause: bool,
+ ) {
+@@ -8850,8 +8866,27 @@ fn publish_effect_zone_choice_tracked_set(
+     }
+     let tracked_id = TrackedSetId(state.next_tracked_set_id);
+     state.next_tracked_set_id += 1;
+-    state.tracked_object_sets.insert(tracked_id, tracked);
++    state
++        .tracked_object_sets
++        .insert(tracked_id, tracked.clone());
+     state.chain_tracked_set_id = Some(tracked_id);
++    // CR 608.2c + CR 614.6: stamp each member's producer action, so an
++    // action-bound consumer ("exiled this way") can discriminate producers that
++    // contributed to the same set. Derived from the DESTINATION through the same
++    // authority the completion seam stamps `EffectResolutionResult.cause` with,
++    // so a set published here and the resolution result that completes it can
++    // never disagree about what this instruction did. `caused_by: None`
++    // consumers ignore the stamp (filter.rs reads the ledger only when a cause
++    // is bound), so this is additive.
++    if let Some(cause) = destination.and_then(effects::this_way_cause_for_zone) {
++        let causes = state
++            .tracked_set_member_causes
++            .entry(tracked_id)
++            .or_default();
++        for id in tracked {
++            causes.insert(id, cause);
++        }
++    }
+ }
+ 
+ fn set_priority(state: &mut GameState, player: crate::types::player::PlayerId) {
+@@ -13313,7 +13348,14 @@ mod tests {
+         state.chain_tracked_set_id = Some(TrackedSetId(1));
+ 
+         // Mid-pause empty must not rebind (Storm Herald Aura-host pause).
+-        publish_effect_zone_choice_tracked_set(&mut state, EffectKind::ChangeZone, &[], None, true);
++        publish_effect_zone_choice_tracked_set(
++            &mut state,
++            EffectKind::ChangeZone,
++            &[],
++            Some(Zone::Exile),
++            None,
++            true,
++        );
+         assert_eq!(state.chain_tracked_set_id, Some(TrackedSetId(1)));
+         assert_eq!(
+             state.tracked_object_sets.get(&TrackedSetId(1)),
+diff --git a/crates/engine/src/parser/oracle_effect/mod.rs b/crates/engine/src/parser/oracle_effect/mod.rs
+index 7903bc085d..fa1fbfdcd9 100644
+--- a/crates/engine/src/parser/oracle_effect/mod.rs
++++ b/crates/engine/src/parser/oracle_effect/mod.rs
+@@ -1060,6 +1060,140 @@ fn filter_is_bare_keyword_kind_predicate(filter: &TargetFilter) -> bool {
+     )
+ }
+ 
++/// CR 702.62a + CR 611.2a + CR 608.2c: Re-anchor BOTH halves of the SINGULAR
++/// keyword-presence anaphor ("If it doesn't have suspend, it gains suspend") onto
++/// the resolution chain's tracked set when the preceding instruction introduced
++/// its subject through a RESOLUTION-TIME PICK (The Eleventh Doctor, Amy's Home:
++/// "you may exile a card from your hand with a number of time counters on it
++/// equal to its mana value. If it doesn't have suspend, it gains suspend.").
++///
++/// The pick is an untargeted choice made while the ability resolves (CR 608.2d),
++/// so — unlike a declared target (CR 115.10a) — it never reaches
++/// `ResolvedAbility.targets`, which is what `AbilityCondition::TargetMatchesFilter`
++/// reads. The predicate half therefore has no referent and would silently fall
++/// through to its `TriggeringSource` fallback; and the grant half's
++/// `TargetFilter::ParentTarget` recipient, while it does bind correctly at
++/// effect-apply time, carries no way to express the per-member keyword test.
++///
++/// Both problems have one answer, and it is the shape the producer already
++/// publishes: the pick IS the chain's tracked set, stamped with its producer
++/// action (`ThisWayCause::Exiled`) by
++/// `engine_resolution_choices::publish_effect_zone_choice_tracked_set`. Folding
++/// the keyword test INTO the set selector — `TrackedSetFiltered { filter:
++/// <the keyword-kind predicate>, caused_by: Some(Exiled) }` — expresses
++/// "the cards exiled this way that don't have suspend" as ONE per-member
++/// selector, which is exactly the `Card.IsRemembered+withoutSuspend` composition
++/// Forge's own script for this card uses. That removes the separate condition
++/// entirely: nothing is left to bind, so the misbinding gate cannot exist.
++///
++/// The keyword is read off the already-parsed grant (`AddKeyword` on the
++/// clause's `GenericEffect`), never re-derived from the sentence, so the whole
++/// "it gains <kw>" class is covered by construction rather than by a keyword
++/// list. The clause's `duration` is untouched: `build_continuous_clause` already
++/// owns the suspend-specific `Permanent` promotion (CR 611.2a).
++///
++/// Returns `true` when it rewrote the clause — the caller must then DROP the
++/// now-redundant condition. `false` leaves both the condition and the clause
++/// exactly as it found them, which is what keeps the three working binding
++/// classes (declared stack target, injected target, trigger source) on their
++/// existing lowerings.
++fn rebind_keyword_anaphor_to_resolution_pick_tracked_set(
++    condition: Option<&AbilityCondition>,
++    clause: &mut ParsedEffectClause,
++    clauses: &[ClauseIr],
++) -> bool {
++    let Some(selector) =
++        keyword_anaphor_resolution_pick_tracked_set_selector(condition, clause, clauses)
++    else {
++        return false;
++    };
++    let Effect::GenericEffect {
++        static_abilities,
++        duration,
++        ..
++    } = &mut clause.effect
++    else {
++        return false;
++    };
++    for static_def in static_abilities.iter_mut() {
++        static_def.affected = Some(selector.clone());
++    }
++    let duration = duration.clone();
++    let static_abilities = std::mem::take(static_abilities);
++    clause.effect = Effect::GenericEffect {
++        static_abilities,
++        duration,
++        target: Some(selector),
++        end_cost: None,
++    };
++    true
++}
++
++/// The tracked-set selector this clause's anaphor must bind to, or `None` when
++/// the clause is not the resolution-pick shape. Split out of
++/// [`rebind_keyword_anaphor_to_resolution_pick_tracked_set`] so the
++/// classification and the rewrite are separately readable; the class check is
++/// the shared [`keyword_anaphor_referent_is_unpublished_resolution_pick`]
++/// predicate, so this rewrite and the three binding classes it must not touch
++/// can never drift apart.
++fn keyword_anaphor_resolution_pick_tracked_set_selector(
++    condition: Option<&AbilityCondition>,
++    clause: &ParsedEffectClause,
++    clauses: &[ClauseIr],
++) -> Option<TargetFilter> {
++    let condition = condition?;
++    if !keyword_anaphor_referent_is_unpublished_resolution_pick(Some(condition), clauses) {
++        return None;
++    }
++    let AbilityCondition::TargetMatchesFilter {
++        filter: TargetFilter::Typed(typed),
++        ..
++    } = condition
++    else {
++        return None;
++    };
++    let keyword = granted_keyword_from_clause(clause)?;
++    let mut inner = typed.clone();
++    inner.properties = vec![FilterProp::WithoutKeywordKind {
++        value: keyword.kind(),
++    }];
++    Some(TargetFilter::TrackedSetFiltered {
++        // The sentinel for "the resolution chain's most recent published set",
++        // bound at resolution time by `resolve_tracked_set_sentinel`.
++        id: crate::types::identifiers::TrackedSetId(0),
++        filter: Box::new(TargetFilter::Typed(inner)),
++        // The producer action the preceding instruction performed. Kept as a
++        // bare destination mapping so the selector and
++        // `publish_effect_zone_choice_tracked_set` share one authority
++        // (`effects::this_way_cause_for_zone`).
++        caused_by: Some(crate::types::ability::ThisWayCause::Exiled),
++    })
++}
++
++/// CR 702.1: The keyword a "gains <kw>" clause's `GenericEffect` grants —
++/// read off the parsed `AddKeyword` modification in the clause's own definition.
++/// `None` when the clause grants no keyword (so a non-keyword "gains …" body
++/// never reaches the tracked-set rebinding above).
++fn granted_keyword_from_clause(
++    clause: &ParsedEffectClause,
++) -> Option<crate::types::keywords::Keyword> {
++    let Effect::GenericEffect {
++        static_abilities, ..
++    } = &clause.effect
++    else {
++        return None;
++    };
++    static_abilities
++        .iter()
++        .flat_map(|static_def| static_def.modifications.iter())
++        .find_map(|modification| match modification {
++            crate::types::ability::ContinuousModification::AddKeyword { keyword } => {
++                Some(keyword.clone())
++            }
++            _ => None,
++        })
++}
++
+ /// CR 608.2k + CR 608.2c + CR 702.62a: re-anchor a keyword-presence anaphor
+ /// ("if it doesn't have suspend") to the COST-PAID object when the
+ /// immediately-preceding non-continuation clause binds its own subject through
+@@ -40871,21 +41005,10 @@ fn parse_effect_chain_ir_body(
+         // parent has no slot to bind to at all — the pick never reaches
+         // `targets`, so the gate would silently read the trigger source. Runs
+         // after the cost-paid rewrite so a re-anchored (cost-paid) condition is
+-        // already out of this shape. Strict-fail to `Unimplemented` instead of
+-        // shipping a misbinding gate, so coverage reports the gap (The Eleventh
+-        // Doctor, Amy's Home) — see the predicate for the full rationale.
+-        if keyword_anaphor_referent_is_unpublished_resolution_pick(
+-            condition.as_ref(),
+-            builder.clauses(),
+-        ) {
+-            unimplemented_clause(
+-                &mut builder,
+-                "keyword_anaphor_resolution_time_pick",
+-                normalized_text,
+-                chunk.boundary_after,
+-            );
+-            continue;
+-        }
++        // already out of this shape. The repair needs BOTH the condition and the
++        // already-parsed grant body, so it is applied as a post-pass at this
++        // loop's single emission site (see
++        // `rebind_keyword_anaphor_to_resolution_pick_tracked_set`).
+         // CR 608.2c: "[effect] a number of times equal to the difference" — when
+         // a leading comparison condition was just stripped, a trailing
+         // difference-repeat suffix repeats the effect by the unsigned magnitude
+@@ -43890,6 +44013,24 @@ fn parse_effect_chain_ir_body(
+             continue;
+         }
+ 
++        // CR 608.2k + CR 608.2d + CR 702.62a: a keyword-presence anaphor whose
++        // referent is a RESOLUTION-TIME PICK has no runtime slot that could hold
++        // it, so both halves of the clause are re-anchored onto the tracked set
++        // the pick publishes. Applied here — this loop's single `Emit` site —
++        // because the repair rewrites the CONDITION and the already-parsed GRANT
++        // BODY together; anywhere earlier there is no parsed body to read the
++        // granted keyword off. A `None` result leaves the condition exactly as
++        // the passes above settled it, so the three working binding classes are
++        // untouched.
++        let mut condition = condition;
++        if rebind_keyword_anaphor_to_resolution_pick_tracked_set(
++            condition.as_ref(),
++            &mut clause,
++            builder.clauses(),
++        ) {
++            condition = None;
++        }
++
+         // CR 115.1 + CR 701.9b: `target_selection_mode` snapshots the parser's
+         // per-chunk selection mode. Set to `Random` by `parse_target_with_ctx`
+         // when "random " was stripped from this chunk's target phrase.
+diff --git a/crates/engine/src/parser/oracle_effect/tests.rs b/crates/engine/src/parser/oracle_effect/tests.rs
+index 8611ebef12..4c968b5a83 100644
+--- a/crates/engine/src/parser/oracle_effect/tests.rs
++++ b/crates/engine/src/parser/oracle_effect/tests.rs
+@@ -17888,18 +17888,33 @@ fn keyword_anaphor_rebinds_to_cost_paid_object_after_cost_paid_parent() {
+     );
+ }
+ 
+-/// CR 608.2d + CR 115.10a: when the anaphor's referent is a RESOLUTION-TIME PICK
+-/// (The Eleventh Doctor, Amy's Home), it never reaches `ResolvedAbility.targets`
+-/// — the gate would silently fall back to the trigger source and re-grant the
+-/// keyword onto a card that already has it, clobbering its printed parameters,
+-/// while `cargo coverage` reported the card fully supported. The clause
+-/// strict-fails to `Effect::Unimplemented` instead, so the gap is visible.
++/// Expected shape of the resolution-pick rebinding: the exiled-card set
++/// selector, carrying the producer action AND the negated kind-level keyword
++/// test folded into the set's own inner filter.
++#[cfg(test)]
++fn exiled_without_keyword_selector(kind: crate::types::keywords::KeywordKind) -> TargetFilter {
++    TargetFilter::TrackedSetFiltered {
++        id: crate::types::identifiers::TrackedSetId(0),
++        filter: Box::new(without_keyword_kind_filter(kind)),
++        caused_by: Some(crate::types::ability::ThisWayCause::Exiled),
++    }
++}
++
++/// CR 608.2d + CR 608.2c + CR 702.62a: when the anaphor's referent is a
++/// RESOLUTION-TIME PICK (The Eleventh Doctor, Amy's Home), it never reaches
++/// `ResolvedAbility.targets` — the gate would silently fall back to the trigger
++/// source and re-grant the keyword onto a card that already has it, clobbering
++/// its printed parameters, while `cargo coverage` reported the card fully
++/// supported. Both halves of the clause are therefore re-anchored onto the
++/// tracked set the pick publishes, with the keyword test folded into the set
++/// selector: `TrackedSetFiltered { filter: <no suspend>, caused_by: Exiled }`
++/// reads "the cards exiled this way that don't have suspend" as ONE per-member
++/// selector, so no separate condition is left to misbind.
+ ///
+-/// Revert-fail: without
+-/// `keyword_anaphor_referent_is_unpublished_resolution_pick` the gated grant
+-/// parses as a supported `GenericEffect` carrying `WithoutKeywordKind`.
++/// Revert-fail: the clause strict-fails to `Effect::Unimplemented` (the
++/// pre-repair lowering), and the `affected`/`target` assertions below read it.
+ #[test]
+-fn keyword_anaphor_after_resolution_time_pick_strict_fails_to_unimplemented() {
++fn keyword_anaphor_after_resolution_time_pick_binds_to_the_exiled_tracked_set() {
+     // Verbatim The Eleventh Doctor Oracle text (ability-word prefix elided; it
+     // is stripped before dispatch).
+     let doctor = parse_oracle_text(
+@@ -17925,10 +17940,39 @@ fn keyword_anaphor_after_resolution_time_pick_strict_fails_to_unimplemented() {
+         .as_deref()
+         .expect("the suspend grant is the gated sub-ability");
+     assert_eq!(
+-        gated.effect.unimplemented_description(),
+-        Some("If it doesn't have suspend, it gains suspend"),
+-        "the unbindable gate must surface as a coverage gap, got {:?}",
+-        gated.effect
++        gated.condition, None,
++        "the keyword test moves INTO the set selector, so no condition is left \
++         to misbind to the trigger source; got {:?}",
++        gated.condition
++    );
++    let Effect::GenericEffect {
++        static_abilities,
++        duration,
++        target,
++        ..
++    } = &*gated.effect
++    else {
++        panic!("the grant must be a GenericEffect, got {:?}", gated.effect);
++    };
++    assert_eq!(
++        static_abilities[0].affected,
++        Some(exiled_without_keyword_selector(
++            crate::types::keywords::KeywordKind::Suspend
++        )),
++        "the grant must bind the exiled-and-keyword-less set"
++    );
++    assert_eq!(
++        target.as_ref(),
++        Some(&exiled_without_keyword_selector(
++            crate::types::keywords::KeywordKind::Suspend
++        )),
++        "the outer application filter must name the same set, so the runtime \
++         cannot fall back to the `ParentTarget` broadcast arm"
++    );
++    assert_eq!(
++        *duration,
++        Some(Duration::Permanent),
++        "CR 611.2a: the suspend grant has no turn-scoped expiry"
+     );
+ 
+     // The class, not the card: Amy's Home is the second corpus member and words
+@@ -17940,14 +17984,30 @@ fn keyword_anaphor_after_resolution_time_pick_strict_fails_to_unimplemented() {
+          on it equal to its mana value. If it doesn't have suspend, it gains suspend.",
+         AbilityKind::Spell,
+     );
++    let amys_gated = amys_home
++        .sub_ability
++        .as_deref()
++        .expect("Amy's Home's suspend grant is the gated sub-ability");
+     assert_eq!(
+-        amys_home
+-            .sub_ability
+-            .as_deref()
+-            .and_then(|sub| sub.effect.unimplemented_description()),
+-        Some("If it doesn't have suspend, it gains suspend"),
+-        "the same pick→anaphor pair must strict-fail for Amy's Home, got {:?}",
+-        amys_home.sub_ability
++        amys_gated.condition, None,
++        "the same pick→anaphor pair must rebind for Amy's Home, got {:?}",
++        amys_gated.condition
++    );
++    let Effect::GenericEffect {
++        static_abilities, ..
++    } = &*amys_gated.effect
++    else {
++        panic!(
++            "Amy's Home's grant must be a GenericEffect, got {:?}",
++            amys_gated.effect
++        );
++    };
++    assert_eq!(
++        static_abilities[0].affected,
++        Some(exiled_without_keyword_selector(
++            crate::types::keywords::KeywordKind::Suspend
++        )),
++        "Amy's Home must bind the same exiled-and-keyword-less set"
+     );
+ 
+     // Hostile fixture #1 — Delay. Its exile clause is `TargetChoiceTiming::
+diff --git a/crates/engine/src/types/game_state.rs b/crates/engine/src/types/game_state.rs
+index 37b417f322..e1b02082c5 100644
+--- a/crates/engine/src/types/game_state.rs
++++ b/crates/engine/src/types/game_state.rs
+@@ -4103,8 +4103,13 @@ pub struct PendingChangeZoneIteration {
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub enters_under_player: Option<PlayerId>,
+     pub enters_attacking: bool,
++    /// CR 122.1 + CR 614.1c + CR 608.2c: Unconditional entry-counter specs
++    /// carried across a pause. Counts that do not read the moved object arrive
++    /// resolved; a recipient-reading one stays an expression and is answered per
++    /// remaining object on resume
++    /// (`change_zone::enter_with_counters_for_object`).
+     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+-    pub enter_with_counters: Vec<(crate::types::counter::CounterType, u32)>,
++    pub enter_with_counters: Vec<crate::game::effects::change_zone::EnterCounterSpec>,
+     /// Conditional entry-counter specs carried across a pause so each remaining
+     /// object can be re-evaluated per-object on resume (Winter Soldier Hero
+     /// rider through `EffectZoneChoice`).
+@@ -14762,11 +14767,15 @@ pub enum WaitingFor {
+         /// `enter_transformed` / `enters_under_player` carry-through above.
+         #[serde(default, skip_serializing_if = "Option::is_none")]
+         face_down_profile: Option<crate::types::ability::FaceDownProfile>,
+-        /// CR 122.1 + CR 614.1c: Unconditional entry-time counters carried across
+-        /// the `EffectZoneChoice` round-trip (e.g. "enters with two +1/+1
+-        /// counters").
++        /// CR 122.1 + CR 614.1c + CR 608.2c: Unconditional entry-time counter
++        /// specs carried across the `EffectZoneChoice` round-trip. Counts that
++        /// do not read the moved object arrive resolved; an
++        /// `ObjectScope::Recipient` count ("a number of time counters on it
++        /// equal to its mana value" — The Eleventh Doctor, Amy's Home) stays an
++        /// expression, because it names the card the player has not picked yet
++        /// (`change_zone::enter_with_counters_for_object`).
+         #[serde(default, skip_serializing_if = "Vec::is_empty")]
+-        enter_with_counters: Vec<(CounterType, u32)>,
++        enter_with_counters: Vec<crate::game::effects::change_zone::EnterCounterSpec>,
+         /// CR 122.1 + CR 614.1c: Conditional entry-time counter specs carried
+         /// across the `EffectZoneChoice` round-trip (e.g. "If a Hero enters
+         /// this way, it enters with an additional +1/+1 counter on it").
+diff --git a/crates/engine/tests/integration/keyword_anaphor_subject_binding.rs b/crates/engine/tests/integration/keyword_anaphor_subject_binding.rs
+index 134891c956..228dbc43af 100644
+--- a/crates/engine/tests/integration/keyword_anaphor_subject_binding.rs
++++ b/crates/engine/tests/integration/keyword_anaphor_subject_binding.rs
+@@ -456,48 +456,38 @@ mod declared_stack_target {
+ }
+ 
+ /// Binding class 4 — the referent is picked DURING RESOLUTION (Amy's Home, The
+-/// Eleventh Doctor). The keyword gate is UNBINDABLE for this shape, so the
+-/// parser strict-fails it to `Effect::Unimplemented` and coverage reports the
+-/// gap instead of reporting the card supported.
++/// Eleventh Doctor). The pick reaches neither the grant's condition slot nor
++/// `ResolvedAbility.targets`, so BOTH halves of the clause are re-anchored onto
++/// the tracked set the pick publishes, with the keyword test folded into the set
++/// selector:
+ ///
+-/// Why unbindable: the pick reaches the grant's RECIPIENT correctly
+-/// (`TargetFilter::ParentTarget` resolves to the chosen card at effect-apply
+-/// time), but CR 608.2d makes it an untargeted choice made while the ability
+-/// resolves, so it is never written into `ResolvedAbility.targets` — which is
+-/// what the condition reads. `TargetMatchesFilter { subject_slot: None }` would
+-/// therefore find no object target and fall through to its `TriggeringSource`
+-/// fallback: for a combat-damage trigger that is The Eleventh Doctor itself, the
+-/// very object the old `SourceLacksKeyword` lowering read. Shipping that gate
+-/// would re-grant suspend onto a card that already has it and clobber its
+-/// printed `Suspend 4—{U}` down to `{0}`, while `cargo coverage` reported the
+-/// card fully supported — the coverage-honesty contract the plural form
+-/// (`try_parse_exiled_this_way_keyword_grant`) already respects.
++/// ```text
++/// TrackedSetFiltered { filter: Typed[WithoutKeywordKind Suspend],
++///                      caused_by: Some(Exiled) }
++/// ```
+ ///
+-/// Two separate upstream defects remain, each its own unit of work:
+-///   1. **The resolution-time pick is not published into the sub-chain's
+-///      `targets`.** Repairing that is what lifts the strict failure: the
+-///      predicate to relax is
+-///      `keyword_anaphor_referent_is_unpublished_resolution_pick`
+-///      (`parser/oracle_effect/mod.rs`).
+-///   2. **`change_zone.rs` resolves `enter_with_counters` EAGERLY.** The parser
+-///      is NOT at fault here: "with a number of time counters on it equal to its
+-///      mana value" lowers correctly to
+-///      `enter_with_counters: [(Time, Ref(ObjectManaValue { scope: Recipient }))]`
+-///      — pinned by `parse_exile_from_hand_with_dynamic_counter_suffix` in
+-///      `parser/oracle_effect/imperative.rs`.
+-///      `game/effects/change_zone.rs` (`resolve_quantity_with_targets` at
+-///      resolver entry) resolves it BEFORE the interactive `EffectZoneChoice`
+-///      pick binds the recipient, and `resolve_quantity_with_targets` passes
+-///      `recipient: None`. `ObjectScope::Recipient`'s fallback ladder
+-///      (`game/quantity.rs`, `object_for_scope`) then walks recipient → first
+-///      object target (empty for a resolution pick) → `ctx.entering` (unset
+-///      outside ETB replacement) → the ability SOURCE, so the count becomes the
+-///      SOURCE's mana value, never the chosen card's. In the fixture below the
+-///      source is a scenario-built creature with no mana cost, so that is 0.
++/// That is the `Card.IsRemembered+withoutSuspend` composition Forge's own script
++/// for the card uses, expressed with the engine's existing parts — a per-member
++/// predicate over the set, so no separate condition is left to misbind to the
++/// trigger source (which, for a combat-damage trigger, is the Doctor itself) and
++/// no printed `Suspend N—{cost}` can be clobbered down to `{0}`.
+ ///
+-/// This module pins both so a future fix has a baseline and so the class cannot
+-/// silently look repaired.
+-mod resolution_time_choice_disclosed_gap {
++/// Two runtime seams had to carry that shape, and each is pinned by its own test
++/// below:
++///   1. **`publish_effect_zone_choice_tracked_set` stamps the producer action.**
++///      An INTERACTIVE exile publishes its members through the choice-completion
++///      seam, not through `publish_tracked_set_for_resolution`'s event-derived
++///      arm, so nothing wrote `tracked_set_member_causes` and a
++///      `caused_by: Exiled` selector matched nothing.
++///   2. **`enter_with_counters` resolves per moved object.** The parser lowers
++///      "a number of time counters on it equal to its mana value" correctly to
++///      `enter_with_counters: [(Time, Ref(ObjectManaValue { scope: Recipient }))]`
++///      (pinned by `parse_exile_from_hand_with_dynamic_counter_suffix` in
++///      `parser/oracle_effect/imperative.rs`), but the count was resolved at
++///      resolver ENTRY with `recipient: None` — before the pick bound the
++///      recipient — so `ObjectScope::Recipient`'s fallback ladder walked down to
++///      the ability SOURCE and stamped the SOURCE's mana value.
++mod resolution_time_choice_binding {
+     use super::*;
+     use crate::rules::run_combat;
+     use engine::parser::parse_oracle_text;
+@@ -532,8 +522,8 @@ mod resolution_time_choice_disclosed_gap {
+ 
+         // Answer the optional trigger and its resolution-time card pick. Same
+         // terminal-state contract as `settle`: only an empty stack at a priority
+-        // window is a legal exit, because both pins below (a zero time-counter
+-        // count, an absent suspend grant) are exactly what a card that never
++        // window is a legal exit, because the pins below (the time-counter count,
++        // the presence of the suspend grant) are exactly what a card that never
+         // left the hand would also show.
+         let mut saw_optional = false;
+         let mut saw_pick = false;
+@@ -593,16 +583,10 @@ mod resolution_time_choice_disclosed_gap {
+         (runner, hand_card)
+     }
+ 
+-    /// DISCLOSED GAP #1, pinned at the PARSE seam: the unbindable gate must be
+-    /// visible to coverage as `Effect::Unimplemented`, not hidden behind a green
+-    /// card whose only warning lives in a test comment.
+-    ///
+-    /// Revert-fail: without
+-    /// `keyword_anaphor_referent_is_unpublished_resolution_pick`, the gated
+-    /// clause parses as a supported `GenericEffect` suspend grant and
+-    /// `is_ability_supported` reports the card fully supported.
++    /// The trigger's exile half parses, the pick is offered and answered, and the
++    /// grant is a REAL supported effect rather than a coverage gap.
+     #[test]
+-    fn the_unbindable_gate_is_disclosed_as_a_coverage_gap() {
++    fn the_pick_targets_the_exiled_tracked_set_instead_of_a_coverage_gap() {
+         let parsed = parse_oracle_text(
+             ELEVENTH_DOCTOR,
+             "The Eleventh Doctor",
+@@ -614,62 +598,53 @@ mod resolution_time_choice_disclosed_gap {
+             .execute
+             .as_deref()
+             .expect("the combat-damage trigger has an effect chain");
+-        // Reach-guard: the exile half still parses, so the gap is scoped to the
++        // Reach-guard: the exile half still parses, so the repair is scoped to the
+         // gate and did not swallow the whole trigger.
+         assert!(
+             matches!(&*execute.effect, Effect::ChangeZone { .. }),
+             "the hand exile must still parse, got {:?}",
+             execute.effect
+         );
+-        let gated = execute
++        let grant = execute
+             .sub_ability
+             .as_deref()
+-            .expect("the suspend grant is the gated sub-ability");
++            .expect("the suspend grant is the sub-ability");
+         assert_eq!(
+-            gated.effect.unimplemented_description(),
+-            Some("If it doesn't have suspend, it gains suspend"),
+-            "the unbindable gate must surface as a coverage gap, got {:?}",
+-            gated.effect
++            grant.effect.unimplemented_description(),
++            None,
++            "the grant must no longer be a disclosed gap, got {:?}",
++            grant.effect
++        );
++        assert_eq!(
++            grant.condition, None,
++            "the keyword test lives inside the set selector now, got {:?}",
++            grant.condition
+         );
+     }
+ 
+-    /// The half that DOES work, and the reach-guard for the two runtime pins
+-    /// below: the optional trigger, the resolution-time pick and the exile all
+-    /// happen. Only the gated grant is deferred.
++    /// CR 702.62a: the chosen card actually gains suspend — the payoff the
++    /// disclosed-gap module could only defer.
+     #[test]
+-    fn chosen_card_is_exiled_and_the_deferred_grant_does_not_fire() {
++    fn the_chosen_card_gains_suspend() {
+         let (runner, card) = drive(false);
+ 
+         assert_eq!(
+             runner.state().objects[&card].zone,
+             Zone::Exile,
+-            "the chosen hand card must be exiled"
++            "reach-guard: the chosen hand card must be exiled"
+         );
+         assert!(
+-            !object_has_effective_keyword_kind(runner.state(), card, KeywordKind::Suspend),
+-            "KNOWN GAP #1: the grant is deferred to `Unimplemented` until the \
+-             resolution-time pick is published into the sub-chain's `targets`"
++            object_has_effective_keyword_kind(runner.state(), card, KeywordKind::Suspend),
++            "CR 702.62a: the exiled card must gain suspend"
+         );
+     }
+ 
+-    /// DISCLOSED GAP #2, pinned: the chosen MV-3 card enters exile with ZERO time
+-    /// counters instead of three (CR 122.1).
+-    ///
+-    /// The defect is in the RUNTIME, not the parser: the AST carries
+-    /// `ObjectManaValue { scope: Recipient }`, but `change_zone.rs` resolves
+-    /// `enter_with_counters` at resolver entry — before the `EffectZoneChoice`
+-    /// pick binds the recipient — with `recipient: None`, so `object_for_scope`
+-    /// walks its fallback ladder down to the ability SOURCE and reports the
+-    /// SOURCE's mana value. This scenario's Doctor is built with no mana cost, so
+-    /// that is 0; on a real board it would be the Doctor's mana value (3), which
+-    /// is just as wrong. Flip this to 3 when `change_zone.rs` resolves the count
+-    /// AFTER the pick binds the recipient.
++    /// CR 122.1: the chosen MV-3 card enters exile with THREE time counters —
++    /// `<its mana value>`, read off the card the pick bound, not the source.
+     #[test]
+-    fn mana_value_time_counters_read_the_source_not_the_chosen_card() {
++    fn the_chosen_card_gets_time_counters_equal_to_its_own_mana_value() {
+         let (runner, card) = drive(false);
+ 
+-        // Reach-guard: a card still in hand also has zero time counters, so the
+-        // pin below only means anything once the exile has actually happened.
+         assert_eq!(
+             runner.state().objects[&card].zone,
+             Zone::Exile,
+@@ -681,23 +656,23 @@ mod resolution_time_choice_disclosed_gap {
+                 .get(&CounterType::Time)
+                 .copied()
+                 .unwrap_or(0),
+-            0,
+-            "KNOWN GAP #2: the eager `enter_with_counters` resolution reads the \
+-             SOURCE's mana value (0 here), not the chosen card's 3"
++            3,
++            "CR 122.1: the chosen card's mana value (3) determines the number of \
++             time counters, not the Doctor's"
+         );
+     }
+ 
+-    /// The observable payoff of disclosing gap #1 instead of shipping the
+-    /// misbinding gate: a card that already has printed `Suspend 4—{U}` keeps its
+-    /// parameters. The old lowering (and the unbindable `TriggeringSource`
+-    /// fallback) re-granted suspend here and `upsert_keyword_contribution`
+-    /// clobbered the printed contribution down to `Suspend 0—{}`.
++    /// CR 702.62a: a card that already has printed `Suspend 4—{U}` keeps its
++    /// parameters. This is the per-member half of the selector doing its job: the
++    /// set is restricted to members WITHOUT the keyword, so no redundant grant is
++    /// installed and `upsert_keyword_contribution` cannot clobber the printed
++    /// contribution down to `Suspend 0—{}`.
+     ///
+-    /// Revert-fail: with the strict failure removed, the gate reads the trigger
+-    /// source (which never has suspend), the grant fires, and this reads
++    /// Revert-fail: with a bare `TrackedSet` selector (or the old misbinding
++    /// `TargetMatchesFilter` gate) the grant fires here and this reads
+     /// `Some({0})`.
+     #[test]
+-    fn printed_suspend_parameters_survive_the_deferred_grant() {
++    fn printed_suspend_parameters_survive_the_grant() {
+         let (runner, card) = drive(true);
+ 
+         assert_eq!(
+@@ -712,4 +687,32 @@ mod resolution_time_choice_disclosed_gap {
+              grant may clobber it to {{0}}"
+         );
+     }
++
++    /// The card the module is named for, measured end to end: the Doctor's
++    /// trigger exiles the chosen card with its own mana value in time counters
++    /// and that card has suspend. Before the repair this exact drive produced a
++    /// card in exile with ZERO counters and no keyword.
++    #[test]
++    fn the_eleventh_doctor_exiles_the_chosen_card_with_suspend() {
++        let (runner, card) = drive(false);
++
++        assert_eq!(
++            runner.state().objects[&card].zone,
++            Zone::Exile,
++            "reach-guard: the chosen hand card must be exiled"
++        );
++        assert_eq!(
++            runner.state().objects[&card]
++                .counters
++                .get(&CounterType::Time)
++                .copied()
++                .unwrap_or(0),
++            3,
++            "CR 122.1: three time counters for the chosen MV-3 card"
++        );
++        assert!(
++            object_has_effective_keyword_kind(runner.state(), card, KeywordKind::Suspend),
++            "CR 702.62a: the exiled card must have suspend"
++        );
++    }
+ }

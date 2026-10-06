@@ -1,0 +1,30 @@
+From 285606b618de3d1c1c8fd82c34281913ad18ebb5 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 21:46:21 +0800
+Subject: [PATCH 5/5] fix(engine): widen EnterCounterSpec to the visibility its
+ carriers require
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+`PendingChangeZoneIteration::enter_with_counters` and
+`WaitingFor::EffectZoneChoice::enter_with_counters` are `pub` fields of
+`pub` structs, so a `pub(crate)` payload type trips the
+`private_interfaces` lint — a hard failure under `clippy -D warnings`.
+---
+ crates/engine/src/game/effects/change_zone.rs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/crates/engine/src/game/effects/change_zone.rs b/crates/engine/src/game/effects/change_zone.rs
+index 4a0d51a429..a3762169dc 100644
+--- a/crates/engine/src/game/effects/change_zone.rs
++++ b/crates/engine/src/game/effects/change_zone.rs
+@@ -1617,7 +1617,7 @@ pub(crate) fn enter_with_counters_for_object(
+ /// [`enter_with_counters_for_object`] for the why.
+ #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+ #[serde(tag = "type")]
+-pub(crate) enum EnterCounterSpec {
++pub enum EnterCounterSpec {
+     /// The count has one answer for the whole resolution; already resolved.
+     Resolved {
+         counter_type: CounterType,

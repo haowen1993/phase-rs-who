@@ -889,6 +889,78 @@ fn detect_optional_you_may(
 
 // ── AST predicates ──────────────────────────────────────────────────────
 
+/// CR 702.62a + CR 608.2c: Does any ability in the tree carry a tracked-set
+/// selector whose inner filter is a KEYWORD-PRESENCE predicate? That is the
+/// representation of "If it doesn't have <kw>, it gains <kw>" when the referent
+/// is a resolution-time pick: the pick publishes the set, and the per-member
+/// keyword test rides the selector as `FilterProp::WithoutKeywordKind` rather
+/// than as an `AbilityCondition`.
+///
+/// Gated on the keyword-kind prop, not on `TrackedSetFiltered` alone: plenty of
+/// cards name a filtered tracked set for reasons that have nothing to do with a
+/// leading "if" ("put the land cards revealed this way onto the battlefield"), and
+/// suppressing the detector for those would create false negatives.
+fn keyword_anaphor_folded_into_tracked_set_selector(parsed: &ParsedAbilities) -> bool {
+    let has = |f: fn(&AbilityDefinition) -> bool| {
+        parsed.abilities.iter().any(f)
+            || parsed
+                .triggers
+                .iter()
+                .any(|t| t.execute.as_deref().is_some_and(f))
+    };
+    has(def_tree_has_keyword_selector)
+}
+
+fn def_tree_has_keyword_selector(def: &AbilityDefinition) -> bool {
+    if matches!(
+        &*def.effect,
+        Effect::GenericEffect {
+            static_abilities, ..
+        } if static_abilities
+            .iter()
+            .any(|static_def| static_def
+                .affected
+                .as_ref()
+                .is_some_and(tracked_set_selector_carries_keyword_predicate))
+    ) {
+        return true;
+    }
+    if let Effect::CreateDelayedTrigger { effect, .. } = &*def.effect {
+        if def_tree_has_keyword_selector(effect) {
+            return true;
+        }
+    }
+    if let Some(ref sub) = def.sub_ability {
+        if def_tree_has_keyword_selector(sub) {
+            return true;
+        }
+    }
+    if let Some(ref else_ab) = def.else_ability {
+        if def_tree_has_keyword_selector(else_ab) {
+            return true;
+        }
+    }
+    def.mode_abilities.iter().any(def_tree_has_keyword_selector)
+}
+
+fn tracked_set_selector_carries_keyword_predicate(filter: &TargetFilter) -> bool {
+    match filter {
+        TargetFilter::TrackedSetFiltered { filter, .. } => match &**filter {
+            TargetFilter::Typed(typed) => typed.properties.iter().any(|property| {
+                matches!(
+                    property,
+                    FilterProp::HasKeywordKind { .. } | FilterProp::WithoutKeywordKind { .. }
+                )
+            }),
+            other => tracked_set_selector_carries_keyword_predicate(other),
+        },
+        TargetFilter::Or { filters } | TargetFilter::And { filters } => filters
+            .iter()
+            .any(tracked_set_selector_carries_keyword_predicate),
+        _ => false,
+    }
+}
+
 /// Recursive walk: does any def in the tree have `optional == true`,
 /// `optional_targeting == true`, or an effect that internally encodes
 /// "you may" via its own parameters (e.g., `Dig { up_to: true }`,
@@ -4473,6 +4545,16 @@ fn detect_condition_if(
     if unconditional_valmod_leading_if_is_only_if_marker(&stripped, parsed) {
         return;
     }
+    // CR 702.62a + CR 608.2c: a keyword-presence anaphor whose referent is a
+    // RESOLUTION-TIME PICK has no object slot to bind to, so BOTH halves of the
+    // clause are represented by ONE tracked-set selector —
+    // `TrackedSetFiltered { filter: <keyword-kind predicate>, caused_by: … }`
+    // ("the cards exiled this way that don't have suspend"). The keyword test
+    // moves INTO that selector, which is why it is no longer a `condition` slot
+    // and why the slot probes below cannot see it. Read the selector instead.
+    if keyword_anaphor_folded_into_tracked_set_selector(parsed) {
+        return;
+    }
     // Bare " if " — covers prefix conditional ("if X, do Y") and suffix
     // conditional ("do Y if X"). Excluded: "as if", "even if" — modifiers,
     // not conditions. Also "if able" (CR 508.1d / CR 509.1c) —
@@ -6105,6 +6187,63 @@ mod tests {
             parsed.parse_warnings
         );
         found[0]
+    }
+
+    /// CR 702.62a + CR 608.2c: "If it doesn't have suspend, it gains suspend"
+    /// after a RESOLUTION-TIME PICK (The Eleventh Doctor, Amy's Home) is
+    /// represented by ONE tracked-set selector carrying the keyword test —
+    /// `TrackedSetFiltered { filter: Typed[WithoutKeywordKind Suspend],
+    /// caused_by: Exiled }` — so the clause's keyword predicate no longer
+    /// occupies an `AbilityCondition` slot. The `Condition_If` detector reads
+    /// the slot, must therefore read the SELECTOR too, and must not report a
+    /// swallowed conditional for a card whose conditional is structurally
+    /// represented. Measured: without this exemption the card stays
+    /// `supported: false` in `coverage-data.json` even though every node of its
+    /// parse tree is supported — the coverage-honesty contract inverted.
+    ///
+    /// Revert-fail: with the exemption removed the assertion below reports one
+    /// `Condition_If` swallow for The Eleventh Doctor.
+    #[test]
+    fn condition_if_exempts_a_keyword_anaphor_folded_into_a_tracked_set_selector() {
+        // Verbatim Oracle text, real card name (venue B).
+        let doctor = parse_named(
+            "I. AM. TALKING! — Whenever The Eleventh Doctor deals combat damage to a \
+             player, you may exile a card from your hand with a number of time counters \
+             on it equal to its mana value. If it doesn't have suspend, it gains suspend.",
+            "The Eleventh Doctor",
+            &["Legendary", "Creature"],
+        );
+        // Reach guards: the clause parsed as the real grant (not an
+        // `Unimplemented`, which would make the whole unit skip and satisfy the
+        // assertion vacuously), and it really does carry the selector.
+        assert!(
+            super::keyword_anaphor_folded_into_tracked_set_selector(&doctor),
+            "reach guard: the grant must carry the keyword-bearing tracked-set selector"
+        );
+        assert!(
+            swallows_for(&doctor, "Condition_If").is_empty(),
+            "the conditional is represented by the selector, not swallowed: {:?}",
+            doctor.parse_warnings
+        );
+
+        // Class, not card: Amy's Home words its pick differently and takes the
+        // same path.
+        let amys_home = parse_named(
+            "When you planeswalk to Amy's Home, you may exile a nonland card from your \
+             hand with a number of time counters on it equal to its mana value. If it \
+             doesn't have suspend, it gains suspend.",
+            "Amy's Home",
+            &["Plane"],
+        );
+        assert!(
+            super::keyword_anaphor_folded_into_tracked_set_selector(&amys_home),
+            "reach guard: Amy's Home must carry the same selector"
+        );
+        assert!(
+            swallows_for(&amys_home, "Condition_If").is_empty(),
+            "Amy's Home takes the same path: {:?}",
+            amys_home.parse_warnings
+        );
     }
 
     /// `Condition_If` reports the first `if`-guard its ladder rejects, in both

@@ -61002,3 +61002,129 @@ fn quantity_vs_each_opponent_skips_a_player_who_left_the_game() {
         "P2 left the game, so only P1's one card is compared"
     );
 }
+
+/// CR 614.1a + CR 611.2a + CR 607.1: The Eighth Doctor's granted rider.
+///
+/// The PARSER half is covered by `eighth_doctor_disjunctive_permission_carries_the_leave_battlefield_rider`.
+///
+/// This runtime half is NOT YET DRIVEN: casting through a test-installed
+/// `StaticMode::GraveyardCastPermission` leaves the card in Exile rather than on
+/// the battlefield, so the seam assertion below cannot be reached and is
+/// `#[ignore]`d rather than left as a false failure. The seam that needs proving
+/// is the `add_transient_continuous_effect` call in
+/// `casting_costs.rs` (`static_perm_leave_battlefield`) — the permission itself
+/// compiles and carries the flag, but nothing yet demonstrates the replacement
+/// reaching the permanent.
+///
+/// To finish: make the graveyard cast resolve (compare against
+/// `graveyard_cast_this_way_enters_with_finality_counter`, which drives a
+/// `CastFromZone` grant rather than a static permission), then re-enable.
+#[test]
+#[ignore = "runtime half not yet driven: the test cast leaves the card in Exile"]
+fn eighth_doctor_graveyard_cast_installs_the_leave_battlefield_exile_rider() {
+    let mut state = setup_game_at_main_phase();
+
+    // The permission, exactly as the parser lowers The Eighth Doctor's line —
+    // including the trailing rider being recorded on the permission.
+    let permission_text = "Once during each of your turns, you may play a historic land \
+                           or cast a historic permanent spell from your graveyard. If you \
+                           do, it gains \"If this permanent would leave the battlefield, \
+                           exile it instead of putting it anywhere else.\"";
+    let permission = parse_static_line(permission_text).expect("the permission parses");
+    assert!(
+        matches!(
+            &permission.mode,
+            StaticMode::GraveyardCastPermission {
+                leave_battlefield_replacement: true,
+                ..
+            }
+        ),
+        "the rider must be recorded on the permission, got {:?}",
+        permission.mode
+    );
+
+    // CR 604.2: the permission functions from its source on the battlefield.
+    let source = create_object(
+        &mut state,
+        CardId(8_300_001),
+        PlayerId(0),
+        "The Eighth Doctor".to_string(),
+        Zone::Battlefield,
+    );
+    {
+        let obj = state.objects.get_mut(&source).unwrap();
+        obj.card_types.core_types.push(CoreType::Artifact);
+        obj.static_definitions = vec![permission].into();
+    }
+
+    // A historic permanent card in the graveyard (CR 700.6: a legendary artifact
+    // is historic), free to cast so the test isolates the rider.
+    let card = create_object(
+        &mut state,
+        CardId(8_300_002),
+        PlayerId(0),
+        "Historic Artifact".to_string(),
+        Zone::Graveyard,
+    );
+    {
+        let obj = state.objects.get_mut(&card).unwrap();
+        obj.card_types.core_types.push(CoreType::Artifact);
+        obj.card_types.supertypes.push(Supertype::Legendary);
+        obj.mana_cost = ManaCost::zero();
+    }
+
+    apply_as_current(
+        &mut state,
+        GameAction::CastSpell {
+            object_id: card,
+            card_id: CardId(8_300_002),
+            targets: vec![],
+            payment_mode: CastPaymentMode::Auto,
+        },
+    )
+    .expect("the graveyard permission should authorize this cast");
+    for _ in 0..12 {
+        if state.objects[&card].zone == Zone::Battlefield {
+            break;
+        }
+        match state.waiting_for.clone() {
+            WaitingFor::DeclareAttackers { .. } => {
+                apply_as_current(
+                    &mut state,
+                    GameAction::DeclareAttackers {
+                        attacks: vec![],
+                        bands: vec![],
+                    },
+                )
+                .expect("declare no attackers");
+            }
+            _ => {
+                apply_as_current(&mut state, GameAction::PassPriority).expect("priority passes");
+            }
+        }
+    }
+    assert_eq!(
+        state.objects[&card].zone,
+        Zone::Battlefield,
+        "the card cast through the permission should resolve onto the battlefield"
+    );
+
+    // The rider must be installed as a replacement on THAT object. Without the
+    // seam wiring this is empty and the assertion fails.
+    let installed_leave_battlefield = state.transient_continuous_effects.iter().any(|effect| {
+        matches!(
+            &effect.affected,
+            TargetFilter::SpecificObject { id } if *id == card
+        ) && effect.modifications.iter().any(|m| {
+            matches!(
+                m,
+                ContinuousModification::GrantReplacement { replacement }
+                    if replacement.event == ReplacementEvent::Moved
+            )
+        })
+    });
+    assert!(
+        installed_leave_battlefield,
+        "the granted rider must be installed on the permanent cast this way"
+    );
+}

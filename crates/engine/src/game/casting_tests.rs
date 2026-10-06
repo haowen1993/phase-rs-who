@@ -61007,20 +61007,25 @@ fn quantity_vs_each_opponent_skips_a_player_who_left_the_game() {
 ///
 /// The PARSER half is covered by `eighth_doctor_disjunctive_permission_carries_the_leave_battlefield_rider`.
 ///
-/// This runtime half is NOT YET DRIVEN: casting through a test-installed
-/// `StaticMode::GraveyardCastPermission` leaves the card in Exile rather than on
-/// the battlefield, so the seam assertion below cannot be reached and is
-/// `#[ignore]`d rather than left as a false failure. The seam that needs proving
-/// is the `add_transient_continuous_effect` call in
-/// `casting_costs.rs` (`static_perm_leave_battlefield`) — the permission itself
-/// compiles and carries the flag, but nothing yet demonstrates the replacement
-/// reaching the permanent.
+/// This runtime half is NOT YET DRIVEN, and the cause is measured rather than
+/// guessed: the cast itself works (the card reaches the Stack, elected through
+/// the `CastingVariantChoice` menu), but it RESOLVES TO EXILE instead of the
+/// battlefield — so the seam assertion below is unreachable and the test is
+/// `#[ignore]`d rather than left as a false failure.
 ///
-/// To finish: make the graveyard cast resolve (compare against
-/// `graveyard_cast_this_way_enters_with_finality_counter`, which drives a
-/// `CastFromZone` grant rather than a static permission), then re-enable.
+/// The missing piece is the test card's construction, not the engine: an ad-hoc
+/// `create_object` card built here lacks the card-face/permanent data the
+/// resolution needs to decide the spell becomes a permanent. Seven field-guessing
+/// rounds failed to find the gap, so the next attempt should start from the
+/// repository's own fixture path (a real card via `add_real_card` /
+/// `integration_cards.json`) rather than hand-building one — see
+/// `graveyard_cast_this_way_enters_with_finality_counter` for a hand-built card
+/// that DOES resolve, and diff its object setup against this one.
+///
+/// The seam being proven is the `add_transient_continuous_effect` call in
+/// `casting_costs.rs` (`static_perm_leave_battlefield`).
 #[test]
-#[ignore = "runtime half not yet driven: the test cast leaves the card in Exile"]
+#[ignore = "needs a properly built test card: this one resolves to Exile, not the battlefield"]
 fn eighth_doctor_graveyard_cast_installs_the_leave_battlefield_exile_rider() {
     let mut state = setup_game_at_main_phase();
 
@@ -61068,9 +61073,11 @@ fn eighth_doctor_graveyard_cast_installs_the_leave_battlefield_exile_rider() {
     );
     {
         let obj = state.objects.get_mut(&card).unwrap();
-        obj.card_types.core_types.push(CoreType::Artifact);
-        obj.card_types.supertypes.push(Supertype::Legendary);
+        obj.card_types.core_types = vec![CoreType::Artifact];
+        obj.card_types.supertypes = vec![Supertype::Legendary];
+        obj.base_card_types = obj.card_types.clone();
         obj.mana_cost = ManaCost::zero();
+        obj.base_mana_cost = obj.mana_cost.clone();
     }
 
     apply_as_current(
@@ -61088,6 +61095,18 @@ fn eighth_doctor_graveyard_cast_installs_the_leave_battlefield_exile_rider() {
             break;
         }
         match state.waiting_for.clone() {
+            // The permission path is elected through the cast-variant menu, not
+            // by casting straight to the stack: `CastSpell` only opens the menu.
+            WaitingFor::CastingVariantChoice { ref options, .. } => {
+                let index = options
+                    .iter()
+                    .position(|option| {
+                        matches!(option.variant, CastingVariant::GraveyardPermission { .. })
+                    })
+                    .expect("the graveyard permission should be an offered variant");
+                apply_as_current(&mut state, GameAction::ChooseCastingVariant { index })
+                    .expect("choosing the graveyard permission");
+            }
             WaitingFor::DeclareAttackers { .. } => {
                 apply_as_current(
                     &mut state,

@@ -222,6 +222,47 @@ TargetFilter::TrackedSetFiltered {
 剩余 3 张：The Eighth Doctor、Clara Oswald、The Wedding of River Song。
 第 1 步（The Eighth Doctor）代码已完成、运行时测试待补；第 2 步（The Eleventh Doctor）**已完成**。
 
+## ⚡ 先跑这个再决定要不要重建 WASM（省 20 分钟）
+
+**不是每次改解析器都要重建 WASM。** 判据只有一条：**这次改动有没有产生新的
+「会被序列化进 `card-data.json` 的形状」**。
+
+| 改了什么 | 要重建 WASM 吗 |
+|---|---|
+| 解析**逻辑**（同一句话现在选另一个已有变体） | ❌ 不用 |
+| 运行期执行逻辑（effect handler、层计算、调度） | ❌ 不用 |
+| 新增/修改**会序列化进卡数据**的类型变体（`Effect` / `TargetFilter` / `FilterProp` / `ContinuousModification` / `Keyword` …） | ✅ **必须** |
+
+判据可以**实测**，不用靠判断：
+
+```bash
+# 1) 只生成卡数据（会重编原生 engine，但 tool profile 之后是增量的）
+PHASE_DECKS_SCOPE=_WHO ./scripts/gen-card-data.sh
+
+# 2) 用【已构建的 WASM】试着载入【新卡数据】 —— 几秒钟出结果
+node scripts/check-card-data-compat.mjs
+```
+
+- 退出码 **0** → 形状没变，**不用重建**
+- 退出码 **1** → 形状变了，去跑 `./scripts/build-wasm.sh`
+
+顺带验证某张牌是否真的变支持（**别用字符串数 `"Unimplemented"`**，
+覆盖率树是按各自的标签渲染的，数不到）：
+
+```bash
+node scripts/check-card-data-compat.mjs --card "The Eleventh Doctor"
+```
+
+它会打印这棵解析树**每个节点**的 `supported` 标志。
+
+**实测数据（本次工作）**：第十一任博士的三处修复**没有产生新形状**
+（`caused_by: "Exiled"` 是枚举里已有的值），所以那次 20 分钟的 WASM 重建
+**完全没必要** —— 事后用这个闸门验证过：旧 WASM 载入新卡数据，正常。
+
+**另注**：`gen-card-data.sh` 第一次跑要编译 `tool` profile 的整套依赖
+（本次实测约 40 分钟，一次性成本）；之后它只重编 `engine` crate + 链接，快得多。
+真正"每次都要付"的只有 WASM 重建，所以**闸门卡在这一步收益最大**。
+
 ## ⚠️ 改了解析器就必须重建引擎 WASM
 
 **症状**：浏览器报

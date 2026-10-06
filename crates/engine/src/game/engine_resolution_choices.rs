@@ -88,7 +88,7 @@ fn legacy_mass_library_order_prompt_is_current(
     enters_attacking: bool,
     owner_library: bool,
     face_down_profile: Option<&crate::types::ability::FaceDownProfile>,
-    enter_with_counters: &[(crate::types::counter::CounterType, u32)],
+    enter_with_counters: &[effects::change_zone::EnterCounterSpec],
     conditional_enter_with_counters: &[(
         crate::types::ability::TargetFilter,
         crate::types::counter::CounterType,
@@ -6589,6 +6589,7 @@ pub(super) fn handle_resolution_choice(
                         state,
                         effect_kind,
                         &[],
+                        destination,
                         library_position,
                         false,
                     );
@@ -6757,14 +6758,9 @@ pub(super) fn handle_resolution_choice(
                             .get(card_id)
                             .map(|object| object.zone)
                             .unwrap_or(zone);
-                        let per_obj_enter_counters =
-                            effects::change_zone::enter_with_counters_for_pending_object(
-                                state,
-                                source_id,
-                                *card_id,
-                                &enter_with_counters,
-                                &conditional_enter_with_counters,
-                            );
+                        // CR 122.1 + CR 608.2c: hand the counter SPECS on; the
+                        // per-object resolution happens in
+                        // `change_zone::process_one_zone_move_with_terminal`.
                         let ctx = effects::change_zone::ChangeZoneIterationCtx {
                             source_id,
                             controller: player,
@@ -6774,8 +6770,11 @@ pub(super) fn handle_resolution_choice(
                             enter_tapped,
                             enters_under_player,
                             enters_attacking,
-                            enter_with_counters: per_obj_enter_counters,
-                            conditional_enter_with_counters: vec![],
+                            enter_with_counters: enter_with_counters.clone(),
+                            // CR 614.1c: conditional riders ride along, so a
+                            // further pause on this member cannot drop them.
+                            conditional_enter_with_counters: conditional_enter_with_counters
+                                .clone(),
                             // CR 611.2a + CR 610.3: the duration carried across
                             // the `EffectZoneChoice` round-trip — an
                             // "exile ... until ~ leaves the battlefield" move
@@ -6833,6 +6832,7 @@ pub(super) fn handle_resolution_choice(
                                     state,
                                     effect_kind,
                                     &chosen_ids,
+                                    Some(dest_zone),
                                     library_position,
                                     true,
                                 );
@@ -6910,6 +6910,7 @@ pub(super) fn handle_resolution_choice(
                                     state,
                                     effect_kind,
                                     &chosen_ids,
+                                    Some(dest_zone),
                                     library_position,
                                     true,
                                 );
@@ -7523,6 +7524,7 @@ pub(super) fn handle_resolution_choice(
                     state,
                     effect_kind,
                     &tracked,
+                    destination,
                     library_position,
                     false,
                 );
@@ -8770,10 +8772,24 @@ fn action_result_outcome(
 /// choice / replacement ordering still open). When false (terminal completion),
 /// an empty `up_to` selection must rebind a fresh empty chain set so a following
 /// `TargetFilter::TrackedSet` cannot reuse a prior non-empty set.
+///
+/// `destination`: the resolution's zone destination, carried by
+/// `WaitingFor::EffectZoneChoice`. It supplies the producer-action CAUSE the
+/// published members are stamped with (CR 608.2c), through the single
+/// `effects::this_way_cause_for_zone` authority the completion seam already
+/// uses. Without the stamp an action-bound consumer
+/// (`TrackedSetFiltered { caused_by: Some(Exiled) }`, "the cards exiled this
+/// way") matches nothing after an INTERACTIVE pick, because the members reach
+/// the set through this seam rather than through
+/// `effects::publish_tracked_set_for_resolution`'s event-derived arm — so a card
+/// whose exile is chosen by its controller (The Eleventh Doctor, Amy's Home)
+/// could not reach its own continuation. `None` (non-zone-move effect kinds)
+/// stamps nothing, exactly as before.
 fn publish_effect_zone_choice_tracked_set(
     state: &mut GameState,
     effect_kind: EffectKind,
     chosen: &[ObjectId],
+    destination: Option<Zone>,
     library_position: Option<LibraryPosition>,
     mid_pause: bool,
 ) {
@@ -8850,8 +8866,27 @@ fn publish_effect_zone_choice_tracked_set(
     }
     let tracked_id = TrackedSetId(state.next_tracked_set_id);
     state.next_tracked_set_id += 1;
-    state.tracked_object_sets.insert(tracked_id, tracked);
+    state
+        .tracked_object_sets
+        .insert(tracked_id, tracked.clone());
     state.chain_tracked_set_id = Some(tracked_id);
+    // CR 608.2c + CR 614.6: stamp each member's producer action, so an
+    // action-bound consumer ("exiled this way") can discriminate producers that
+    // contributed to the same set. Derived from the DESTINATION through the same
+    // authority the completion seam stamps `EffectResolutionResult.cause` with,
+    // so a set published here and the resolution result that completes it can
+    // never disagree about what this instruction did. `caused_by: None`
+    // consumers ignore the stamp (filter.rs reads the ledger only when a cause
+    // is bound), so this is additive.
+    if let Some(cause) = destination.and_then(effects::this_way_cause_for_zone) {
+        let causes = state
+            .tracked_set_member_causes
+            .entry(tracked_id)
+            .or_default();
+        for id in tracked {
+            causes.insert(id, cause);
+        }
+    }
 }
 
 fn set_priority(state: &mut GameState, player: crate::types::player::PlayerId) {
@@ -13313,7 +13348,14 @@ mod tests {
         state.chain_tracked_set_id = Some(TrackedSetId(1));
 
         // Mid-pause empty must not rebind (Storm Herald Aura-host pause).
-        publish_effect_zone_choice_tracked_set(&mut state, EffectKind::ChangeZone, &[], None, true);
+        publish_effect_zone_choice_tracked_set(
+            &mut state,
+            EffectKind::ChangeZone,
+            &[],
+            Some(Zone::Exile),
+            None,
+            true,
+        );
         assert_eq!(state.chain_tracked_set_id, Some(TrackedSetId(1)));
         assert_eq!(
             state.tracked_object_sets.get(&TrackedSetId(1)),

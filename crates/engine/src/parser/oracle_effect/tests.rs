@@ -17888,18 +17888,33 @@ fn keyword_anaphor_rebinds_to_cost_paid_object_after_cost_paid_parent() {
     );
 }
 
-/// CR 608.2d + CR 115.10a: when the anaphor's referent is a RESOLUTION-TIME PICK
-/// (The Eleventh Doctor, Amy's Home), it never reaches `ResolvedAbility.targets`
-/// — the gate would silently fall back to the trigger source and re-grant the
-/// keyword onto a card that already has it, clobbering its printed parameters,
-/// while `cargo coverage` reported the card fully supported. The clause
-/// strict-fails to `Effect::Unimplemented` instead, so the gap is visible.
+/// Expected shape of the resolution-pick rebinding: the exiled-card set
+/// selector, carrying the producer action AND the negated kind-level keyword
+/// test folded into the set's own inner filter.
+#[cfg(test)]
+fn exiled_without_keyword_selector(kind: crate::types::keywords::KeywordKind) -> TargetFilter {
+    TargetFilter::TrackedSetFiltered {
+        id: crate::types::identifiers::TrackedSetId(0),
+        filter: Box::new(without_keyword_kind_filter(kind)),
+        caused_by: Some(crate::types::ability::ThisWayCause::Exiled),
+    }
+}
+
+/// CR 608.2d + CR 608.2c + CR 702.62a: when the anaphor's referent is a
+/// RESOLUTION-TIME PICK (The Eleventh Doctor, Amy's Home), it never reaches
+/// `ResolvedAbility.targets` — the gate would silently fall back to the trigger
+/// source and re-grant the keyword onto a card that already has it, clobbering
+/// its printed parameters, while `cargo coverage` reported the card fully
+/// supported. Both halves of the clause are therefore re-anchored onto the
+/// tracked set the pick publishes, with the keyword test folded into the set
+/// selector: `TrackedSetFiltered { filter: <no suspend>, caused_by: Exiled }`
+/// reads "the cards exiled this way that don't have suspend" as ONE per-member
+/// selector, so no separate condition is left to misbind.
 ///
-/// Revert-fail: without
-/// `keyword_anaphor_referent_is_unpublished_resolution_pick` the gated grant
-/// parses as a supported `GenericEffect` carrying `WithoutKeywordKind`.
+/// Revert-fail: the clause strict-fails to `Effect::Unimplemented` (the
+/// pre-repair lowering), and the `affected`/`target` assertions below read it.
 #[test]
-fn keyword_anaphor_after_resolution_time_pick_strict_fails_to_unimplemented() {
+fn keyword_anaphor_after_resolution_time_pick_binds_to_the_exiled_tracked_set() {
     // Verbatim The Eleventh Doctor Oracle text (ability-word prefix elided; it
     // is stripped before dispatch).
     let doctor = parse_oracle_text(
@@ -17925,10 +17940,39 @@ fn keyword_anaphor_after_resolution_time_pick_strict_fails_to_unimplemented() {
         .as_deref()
         .expect("the suspend grant is the gated sub-ability");
     assert_eq!(
-        gated.effect.unimplemented_description(),
-        Some("If it doesn't have suspend, it gains suspend"),
-        "the unbindable gate must surface as a coverage gap, got {:?}",
-        gated.effect
+        gated.condition, None,
+        "the keyword test moves INTO the set selector, so no condition is left \
+         to misbind to the trigger source; got {:?}",
+        gated.condition
+    );
+    let Effect::GenericEffect {
+        static_abilities,
+        duration,
+        target,
+        ..
+    } = &*gated.effect
+    else {
+        panic!("the grant must be a GenericEffect, got {:?}", gated.effect);
+    };
+    assert_eq!(
+        static_abilities[0].affected,
+        Some(exiled_without_keyword_selector(
+            crate::types::keywords::KeywordKind::Suspend
+        )),
+        "the grant must bind the exiled-and-keyword-less set"
+    );
+    assert_eq!(
+        target.as_ref(),
+        Some(&exiled_without_keyword_selector(
+            crate::types::keywords::KeywordKind::Suspend
+        )),
+        "the outer application filter must name the same set, so the runtime \
+         cannot fall back to the `ParentTarget` broadcast arm"
+    );
+    assert_eq!(
+        *duration,
+        Some(Duration::Permanent),
+        "CR 611.2a: the suspend grant has no turn-scoped expiry"
     );
 
     // The class, not the card: Amy's Home is the second corpus member and words
@@ -17940,14 +17984,30 @@ fn keyword_anaphor_after_resolution_time_pick_strict_fails_to_unimplemented() {
          on it equal to its mana value. If it doesn't have suspend, it gains suspend.",
         AbilityKind::Spell,
     );
+    let amys_gated = amys_home
+        .sub_ability
+        .as_deref()
+        .expect("Amy's Home's suspend grant is the gated sub-ability");
     assert_eq!(
-        amys_home
-            .sub_ability
-            .as_deref()
-            .and_then(|sub| sub.effect.unimplemented_description()),
-        Some("If it doesn't have suspend, it gains suspend"),
-        "the same pick→anaphor pair must strict-fail for Amy's Home, got {:?}",
-        amys_home.sub_ability
+        amys_gated.condition, None,
+        "the same pick→anaphor pair must rebind for Amy's Home, got {:?}",
+        amys_gated.condition
+    );
+    let Effect::GenericEffect {
+        static_abilities, ..
+    } = &*amys_gated.effect
+    else {
+        panic!(
+            "Amy's Home's grant must be a GenericEffect, got {:?}",
+            amys_gated.effect
+        );
+    };
+    assert_eq!(
+        static_abilities[0].affected,
+        Some(exiled_without_keyword_selector(
+            crate::types::keywords::KeywordKind::Suspend
+        )),
+        "Amy's Home must bind the same exiled-and-keyword-less set"
     );
 
     // Hostile fixture #1 — Delay. Its exile clause is `TargetChoiceTiming::

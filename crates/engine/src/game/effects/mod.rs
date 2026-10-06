@@ -2169,14 +2169,10 @@ fn drain_pending_change_zone_iteration(state: &mut GameState, events: &mut Vec<G
         // their observer triggers are collected with earlier pause segments.
         let events_before_drain = events.len();
         for (i, obj_id) in remaining.iter().enumerate() {
-            let per_obj_enter_counters =
-                crate::game::effects::change_zone::enter_with_counters_for_pending_object(
-                    state,
-                    source_id,
-                    *obj_id,
-                    &enter_with_counters,
-                    &conditional_enter_with_counters,
-                );
+            // CR 122.1 + CR 608.2c: hand the printed counter EXPRESSIONS on; the
+            // per-object resolution happens in
+            // `change_zone::process_one_zone_move_with_terminal`, the one seam
+            // that knows which object is moving.
             let ctx = crate::game::effects::change_zone::ChangeZoneIterationCtx {
                 source_id,
                 controller,
@@ -2186,8 +2182,12 @@ fn drain_pending_change_zone_iteration(state: &mut GameState, events: &mut Vec<G
                 enter_tapped,
                 enters_under_player,
                 enters_attacking,
-                enter_with_counters: per_obj_enter_counters,
-                conditional_enter_with_counters: vec![],
+                enter_with_counters: enter_with_counters.clone(),
+                // CR 614.1c: the conditional riders ride along, so a resumed
+                // member still gets "enters with an additional counter if it's a
+                // Hero" (Winter Soldier Hero through the `EffectZoneChoice`
+                // round-trip).
+                conditional_enter_with_counters: conditional_enter_with_counters.clone(),
                 duration: duration.clone(),
                 track_exiled_by_source,
                 face_down_in_exile,

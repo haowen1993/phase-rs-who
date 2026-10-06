@@ -456,48 +456,38 @@ mod declared_stack_target {
 }
 
 /// Binding class 4 — the referent is picked DURING RESOLUTION (Amy's Home, The
-/// Eleventh Doctor). The keyword gate is UNBINDABLE for this shape, so the
-/// parser strict-fails it to `Effect::Unimplemented` and coverage reports the
-/// gap instead of reporting the card supported.
+/// Eleventh Doctor). The pick reaches neither the grant's condition slot nor
+/// `ResolvedAbility.targets`, so BOTH halves of the clause are re-anchored onto
+/// the tracked set the pick publishes, with the keyword test folded into the set
+/// selector:
 ///
-/// Why unbindable: the pick reaches the grant's RECIPIENT correctly
-/// (`TargetFilter::ParentTarget` resolves to the chosen card at effect-apply
-/// time), but CR 608.2d makes it an untargeted choice made while the ability
-/// resolves, so it is never written into `ResolvedAbility.targets` — which is
-/// what the condition reads. `TargetMatchesFilter { subject_slot: None }` would
-/// therefore find no object target and fall through to its `TriggeringSource`
-/// fallback: for a combat-damage trigger that is The Eleventh Doctor itself, the
-/// very object the old `SourceLacksKeyword` lowering read. Shipping that gate
-/// would re-grant suspend onto a card that already has it and clobber its
-/// printed `Suspend 4—{U}` down to `{0}`, while `cargo coverage` reported the
-/// card fully supported — the coverage-honesty contract the plural form
-/// (`try_parse_exiled_this_way_keyword_grant`) already respects.
+/// ```text
+/// TrackedSetFiltered { filter: Typed[WithoutKeywordKind Suspend],
+///                      caused_by: Some(Exiled) }
+/// ```
 ///
-/// Two separate upstream defects remain, each its own unit of work:
-///   1. **The resolution-time pick is not published into the sub-chain's
-///      `targets`.** Repairing that is what lifts the strict failure: the
-///      predicate to relax is
-///      `keyword_anaphor_referent_is_unpublished_resolution_pick`
-///      (`parser/oracle_effect/mod.rs`).
-///   2. **`change_zone.rs` resolves `enter_with_counters` EAGERLY.** The parser
-///      is NOT at fault here: "with a number of time counters on it equal to its
-///      mana value" lowers correctly to
+/// That is the `Card.IsRemembered+withoutSuspend` composition Forge's own script
+/// for the card uses, expressed with the engine's existing parts — a per-member
+/// predicate over the set, so no separate condition is left to misbind to the
+/// trigger source (which, for a combat-damage trigger, is the Doctor itself) and
+/// no printed `Suspend N—{cost}` can be clobbered down to `{0}`.
+///
+/// Two runtime seams had to carry that shape, and each is pinned by its own test
+/// below:
+///   1. **`publish_effect_zone_choice_tracked_set` stamps the producer action.**
+///      An INTERACTIVE exile publishes its members through the choice-completion
+///      seam, not through `publish_tracked_set_for_resolution`'s event-derived
+///      arm, so nothing wrote `tracked_set_member_causes` and a
+///      `caused_by: Exiled` selector matched nothing.
+///   2. **`enter_with_counters` resolves per moved object.** The parser lowers
+///      "a number of time counters on it equal to its mana value" correctly to
 ///      `enter_with_counters: [(Time, Ref(ObjectManaValue { scope: Recipient }))]`
-///      — pinned by `parse_exile_from_hand_with_dynamic_counter_suffix` in
-///      `parser/oracle_effect/imperative.rs`.
-///      `game/effects/change_zone.rs` (`resolve_quantity_with_targets` at
-///      resolver entry) resolves it BEFORE the interactive `EffectZoneChoice`
-///      pick binds the recipient, and `resolve_quantity_with_targets` passes
-///      `recipient: None`. `ObjectScope::Recipient`'s fallback ladder
-///      (`game/quantity.rs`, `object_for_scope`) then walks recipient → first
-///      object target (empty for a resolution pick) → `ctx.entering` (unset
-///      outside ETB replacement) → the ability SOURCE, so the count becomes the
-///      SOURCE's mana value, never the chosen card's. In the fixture below the
-///      source is a scenario-built creature with no mana cost, so that is 0.
-///
-/// This module pins both so a future fix has a baseline and so the class cannot
-/// silently look repaired.
-mod resolution_time_choice_disclosed_gap {
+///      (pinned by `parse_exile_from_hand_with_dynamic_counter_suffix` in
+///      `parser/oracle_effect/imperative.rs`), but the count was resolved at
+///      resolver ENTRY with `recipient: None` — before the pick bound the
+///      recipient — so `ObjectScope::Recipient`'s fallback ladder walked down to
+///      the ability SOURCE and stamped the SOURCE's mana value.
+mod resolution_time_choice_binding {
     use super::*;
     use crate::rules::run_combat;
     use engine::parser::parse_oracle_text;
@@ -532,8 +522,8 @@ mod resolution_time_choice_disclosed_gap {
 
         // Answer the optional trigger and its resolution-time card pick. Same
         // terminal-state contract as `settle`: only an empty stack at a priority
-        // window is a legal exit, because both pins below (a zero time-counter
-        // count, an absent suspend grant) are exactly what a card that never
+        // window is a legal exit, because the pins below (the time-counter count,
+        // the presence of the suspend grant) are exactly what a card that never
         // left the hand would also show.
         let mut saw_optional = false;
         let mut saw_pick = false;
@@ -593,16 +583,10 @@ mod resolution_time_choice_disclosed_gap {
         (runner, hand_card)
     }
 
-    /// DISCLOSED GAP #1, pinned at the PARSE seam: the unbindable gate must be
-    /// visible to coverage as `Effect::Unimplemented`, not hidden behind a green
-    /// card whose only warning lives in a test comment.
-    ///
-    /// Revert-fail: without
-    /// `keyword_anaphor_referent_is_unpublished_resolution_pick`, the gated
-    /// clause parses as a supported `GenericEffect` suspend grant and
-    /// `is_ability_supported` reports the card fully supported.
+    /// The trigger's exile half parses, the pick is offered and answered, and the
+    /// grant is a REAL supported effect rather than a coverage gap.
     #[test]
-    fn the_unbindable_gate_is_disclosed_as_a_coverage_gap() {
+    fn the_pick_targets_the_exiled_tracked_set_instead_of_a_coverage_gap() {
         let parsed = parse_oracle_text(
             ELEVENTH_DOCTOR,
             "The Eleventh Doctor",
@@ -614,62 +598,53 @@ mod resolution_time_choice_disclosed_gap {
             .execute
             .as_deref()
             .expect("the combat-damage trigger has an effect chain");
-        // Reach-guard: the exile half still parses, so the gap is scoped to the
+        // Reach-guard: the exile half still parses, so the repair is scoped to the
         // gate and did not swallow the whole trigger.
         assert!(
             matches!(&*execute.effect, Effect::ChangeZone { .. }),
             "the hand exile must still parse, got {:?}",
             execute.effect
         );
-        let gated = execute
+        let grant = execute
             .sub_ability
             .as_deref()
-            .expect("the suspend grant is the gated sub-ability");
+            .expect("the suspend grant is the sub-ability");
         assert_eq!(
-            gated.effect.unimplemented_description(),
-            Some("If it doesn't have suspend, it gains suspend"),
-            "the unbindable gate must surface as a coverage gap, got {:?}",
-            gated.effect
+            grant.effect.unimplemented_description(),
+            None,
+            "the grant must no longer be a disclosed gap, got {:?}",
+            grant.effect
+        );
+        assert_eq!(
+            grant.condition, None,
+            "the keyword test lives inside the set selector now, got {:?}",
+            grant.condition
         );
     }
 
-    /// The half that DOES work, and the reach-guard for the two runtime pins
-    /// below: the optional trigger, the resolution-time pick and the exile all
-    /// happen. Only the gated grant is deferred.
+    /// CR 702.62a: the chosen card actually gains suspend — the payoff the
+    /// disclosed-gap module could only defer.
     #[test]
-    fn chosen_card_is_exiled_and_the_deferred_grant_does_not_fire() {
+    fn the_chosen_card_gains_suspend() {
         let (runner, card) = drive(false);
 
         assert_eq!(
             runner.state().objects[&card].zone,
             Zone::Exile,
-            "the chosen hand card must be exiled"
+            "reach-guard: the chosen hand card must be exiled"
         );
         assert!(
-            !object_has_effective_keyword_kind(runner.state(), card, KeywordKind::Suspend),
-            "KNOWN GAP #1: the grant is deferred to `Unimplemented` until the \
-             resolution-time pick is published into the sub-chain's `targets`"
+            object_has_effective_keyword_kind(runner.state(), card, KeywordKind::Suspend),
+            "CR 702.62a: the exiled card must gain suspend"
         );
     }
 
-    /// DISCLOSED GAP #2, pinned: the chosen MV-3 card enters exile with ZERO time
-    /// counters instead of three (CR 122.1).
-    ///
-    /// The defect is in the RUNTIME, not the parser: the AST carries
-    /// `ObjectManaValue { scope: Recipient }`, but `change_zone.rs` resolves
-    /// `enter_with_counters` at resolver entry — before the `EffectZoneChoice`
-    /// pick binds the recipient — with `recipient: None`, so `object_for_scope`
-    /// walks its fallback ladder down to the ability SOURCE and reports the
-    /// SOURCE's mana value. This scenario's Doctor is built with no mana cost, so
-    /// that is 0; on a real board it would be the Doctor's mana value (3), which
-    /// is just as wrong. Flip this to 3 when `change_zone.rs` resolves the count
-    /// AFTER the pick binds the recipient.
+    /// CR 122.1: the chosen MV-3 card enters exile with THREE time counters —
+    /// `<its mana value>`, read off the card the pick bound, not the source.
     #[test]
-    fn mana_value_time_counters_read_the_source_not_the_chosen_card() {
+    fn the_chosen_card_gets_time_counters_equal_to_its_own_mana_value() {
         let (runner, card) = drive(false);
 
-        // Reach-guard: a card still in hand also has zero time counters, so the
-        // pin below only means anything once the exile has actually happened.
         assert_eq!(
             runner.state().objects[&card].zone,
             Zone::Exile,
@@ -681,23 +656,23 @@ mod resolution_time_choice_disclosed_gap {
                 .get(&CounterType::Time)
                 .copied()
                 .unwrap_or(0),
-            0,
-            "KNOWN GAP #2: the eager `enter_with_counters` resolution reads the \
-             SOURCE's mana value (0 here), not the chosen card's 3"
+            3,
+            "CR 122.1: the chosen card's mana value (3) determines the number of \
+             time counters, not the Doctor's"
         );
     }
 
-    /// The observable payoff of disclosing gap #1 instead of shipping the
-    /// misbinding gate: a card that already has printed `Suspend 4—{U}` keeps its
-    /// parameters. The old lowering (and the unbindable `TriggeringSource`
-    /// fallback) re-granted suspend here and `upsert_keyword_contribution`
-    /// clobbered the printed contribution down to `Suspend 0—{}`.
+    /// CR 702.62a: a card that already has printed `Suspend 4—{U}` keeps its
+    /// parameters. This is the per-member half of the selector doing its job: the
+    /// set is restricted to members WITHOUT the keyword, so no redundant grant is
+    /// installed and `upsert_keyword_contribution` cannot clobber the printed
+    /// contribution down to `Suspend 0—{}`.
     ///
-    /// Revert-fail: with the strict failure removed, the gate reads the trigger
-    /// source (which never has suspend), the grant fires, and this reads
+    /// Revert-fail: with a bare `TrackedSet` selector (or the old misbinding
+    /// `TargetMatchesFilter` gate) the grant fires here and this reads
     /// `Some({0})`.
     #[test]
-    fn printed_suspend_parameters_survive_the_deferred_grant() {
+    fn printed_suspend_parameters_survive_the_grant() {
         let (runner, card) = drive(true);
 
         assert_eq!(
@@ -710,6 +685,34 @@ mod resolution_time_choice_disclosed_gap {
             Some(blue_mana_cost()),
             "CR 702.62a: the printed Suspend 4—{{U}} must survive — no redundant \
              grant may clobber it to {{0}}"
+        );
+    }
+
+    /// The card the module is named for, measured end to end: the Doctor's
+    /// trigger exiles the chosen card with its own mana value in time counters
+    /// and that card has suspend. Before the repair this exact drive produced a
+    /// card in exile with ZERO counters and no keyword.
+    #[test]
+    fn the_eleventh_doctor_exiles_the_chosen_card_with_suspend() {
+        let (runner, card) = drive(false);
+
+        assert_eq!(
+            runner.state().objects[&card].zone,
+            Zone::Exile,
+            "reach-guard: the chosen hand card must be exiled"
+        );
+        assert_eq!(
+            runner.state().objects[&card]
+                .counters
+                .get(&CounterType::Time)
+                .copied()
+                .unwrap_or(0),
+            3,
+            "CR 122.1: three time counters for the chosen MV-3 card"
+        );
+        assert!(
+            object_has_effective_keyword_kind(runner.state(), card, KeywordKind::Suspend),
+            "CR 702.62a: the exiled card must have suspend"
         );
     }
 }

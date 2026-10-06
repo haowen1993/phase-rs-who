@@ -1060,6 +1060,140 @@ fn filter_is_bare_keyword_kind_predicate(filter: &TargetFilter) -> bool {
     )
 }
 
+/// CR 702.62a + CR 611.2a + CR 608.2c: Re-anchor BOTH halves of the SINGULAR
+/// keyword-presence anaphor ("If it doesn't have suspend, it gains suspend") onto
+/// the resolution chain's tracked set when the preceding instruction introduced
+/// its subject through a RESOLUTION-TIME PICK (The Eleventh Doctor, Amy's Home:
+/// "you may exile a card from your hand with a number of time counters on it
+/// equal to its mana value. If it doesn't have suspend, it gains suspend.").
+///
+/// The pick is an untargeted choice made while the ability resolves (CR 608.2d),
+/// so — unlike a declared target (CR 115.10a) — it never reaches
+/// `ResolvedAbility.targets`, which is what `AbilityCondition::TargetMatchesFilter`
+/// reads. The predicate half therefore has no referent and would silently fall
+/// through to its `TriggeringSource` fallback; and the grant half's
+/// `TargetFilter::ParentTarget` recipient, while it does bind correctly at
+/// effect-apply time, carries no way to express the per-member keyword test.
+///
+/// Both problems have one answer, and it is the shape the producer already
+/// publishes: the pick IS the chain's tracked set, stamped with its producer
+/// action (`ThisWayCause::Exiled`) by
+/// `engine_resolution_choices::publish_effect_zone_choice_tracked_set`. Folding
+/// the keyword test INTO the set selector — `TrackedSetFiltered { filter:
+/// <the keyword-kind predicate>, caused_by: Some(Exiled) }` — expresses
+/// "the cards exiled this way that don't have suspend" as ONE per-member
+/// selector, which is exactly the `Card.IsRemembered+withoutSuspend` composition
+/// Forge's own script for this card uses. That removes the separate condition
+/// entirely: nothing is left to bind, so the misbinding gate cannot exist.
+///
+/// The keyword is read off the already-parsed grant (`AddKeyword` on the
+/// clause's `GenericEffect`), never re-derived from the sentence, so the whole
+/// "it gains <kw>" class is covered by construction rather than by a keyword
+/// list. The clause's `duration` is untouched: `build_continuous_clause` already
+/// owns the suspend-specific `Permanent` promotion (CR 611.2a).
+///
+/// Returns `true` when it rewrote the clause — the caller must then DROP the
+/// now-redundant condition. `false` leaves both the condition and the clause
+/// exactly as it found them, which is what keeps the three working binding
+/// classes (declared stack target, injected target, trigger source) on their
+/// existing lowerings.
+fn rebind_keyword_anaphor_to_resolution_pick_tracked_set(
+    condition: Option<&AbilityCondition>,
+    clause: &mut ParsedEffectClause,
+    clauses: &[ClauseIr],
+) -> bool {
+    let Some(selector) =
+        keyword_anaphor_resolution_pick_tracked_set_selector(condition, clause, clauses)
+    else {
+        return false;
+    };
+    let Effect::GenericEffect {
+        static_abilities,
+        duration,
+        ..
+    } = &mut clause.effect
+    else {
+        return false;
+    };
+    for static_def in static_abilities.iter_mut() {
+        static_def.affected = Some(selector.clone());
+    }
+    let duration = duration.clone();
+    let static_abilities = std::mem::take(static_abilities);
+    clause.effect = Effect::GenericEffect {
+        static_abilities,
+        duration,
+        target: Some(selector),
+        end_cost: None,
+    };
+    true
+}
+
+/// The tracked-set selector this clause's anaphor must bind to, or `None` when
+/// the clause is not the resolution-pick shape. Split out of
+/// [`rebind_keyword_anaphor_to_resolution_pick_tracked_set`] so the
+/// classification and the rewrite are separately readable; the class check is
+/// the shared [`keyword_anaphor_referent_is_unpublished_resolution_pick`]
+/// predicate, so this rewrite and the three binding classes it must not touch
+/// can never drift apart.
+fn keyword_anaphor_resolution_pick_tracked_set_selector(
+    condition: Option<&AbilityCondition>,
+    clause: &ParsedEffectClause,
+    clauses: &[ClauseIr],
+) -> Option<TargetFilter> {
+    let condition = condition?;
+    if !keyword_anaphor_referent_is_unpublished_resolution_pick(Some(condition), clauses) {
+        return None;
+    }
+    let AbilityCondition::TargetMatchesFilter {
+        filter: TargetFilter::Typed(typed),
+        ..
+    } = condition
+    else {
+        return None;
+    };
+    let keyword = granted_keyword_from_clause(clause)?;
+    let mut inner = typed.clone();
+    inner.properties = vec![FilterProp::WithoutKeywordKind {
+        value: keyword.kind(),
+    }];
+    Some(TargetFilter::TrackedSetFiltered {
+        // The sentinel for "the resolution chain's most recent published set",
+        // bound at resolution time by `resolve_tracked_set_sentinel`.
+        id: crate::types::identifiers::TrackedSetId(0),
+        filter: Box::new(TargetFilter::Typed(inner)),
+        // The producer action the preceding instruction performed. Kept as a
+        // bare destination mapping so the selector and
+        // `publish_effect_zone_choice_tracked_set` share one authority
+        // (`effects::this_way_cause_for_zone`).
+        caused_by: Some(crate::types::ability::ThisWayCause::Exiled),
+    })
+}
+
+/// CR 702.1: The keyword a "gains <kw>" clause's `GenericEffect` grants —
+/// read off the parsed `AddKeyword` modification in the clause's own definition.
+/// `None` when the clause grants no keyword (so a non-keyword "gains …" body
+/// never reaches the tracked-set rebinding above).
+fn granted_keyword_from_clause(
+    clause: &ParsedEffectClause,
+) -> Option<crate::types::keywords::Keyword> {
+    let Effect::GenericEffect {
+        static_abilities, ..
+    } = &clause.effect
+    else {
+        return None;
+    };
+    static_abilities
+        .iter()
+        .flat_map(|static_def| static_def.modifications.iter())
+        .find_map(|modification| match modification {
+            crate::types::ability::ContinuousModification::AddKeyword { keyword } => {
+                Some(keyword.clone())
+            }
+            _ => None,
+        })
+}
+
 /// CR 608.2k + CR 608.2c + CR 702.62a: re-anchor a keyword-presence anaphor
 /// ("if it doesn't have suspend") to the COST-PAID object when the
 /// immediately-preceding non-continuation clause binds its own subject through
@@ -40872,21 +41006,10 @@ fn parse_effect_chain_ir_body(
         // parent has no slot to bind to at all — the pick never reaches
         // `targets`, so the gate would silently read the trigger source. Runs
         // after the cost-paid rewrite so a re-anchored (cost-paid) condition is
-        // already out of this shape. Strict-fail to `Unimplemented` instead of
-        // shipping a misbinding gate, so coverage reports the gap (The Eleventh
-        // Doctor, Amy's Home) — see the predicate for the full rationale.
-        if keyword_anaphor_referent_is_unpublished_resolution_pick(
-            condition.as_ref(),
-            builder.clauses(),
-        ) {
-            unimplemented_clause(
-                &mut builder,
-                "keyword_anaphor_resolution_time_pick",
-                normalized_text,
-                chunk.boundary_after,
-            );
-            continue;
-        }
+        // already out of this shape. The repair needs BOTH the condition and the
+        // already-parsed grant body, so it is applied as a post-pass at this
+        // loop's single emission site (see
+        // `rebind_keyword_anaphor_to_resolution_pick_tracked_set`).
         // CR 608.2c: "[effect] a number of times equal to the difference" — when
         // a leading comparison condition was just stripped, a trailing
         // difference-repeat suffix repeats the effect by the unsigned magnitude
@@ -43889,6 +44012,24 @@ fn parse_effect_chain_ir_body(
                 chunk.boundary_after,
             );
             continue;
+        }
+
+        // CR 608.2k + CR 608.2d + CR 702.62a: a keyword-presence anaphor whose
+        // referent is a RESOLUTION-TIME PICK has no runtime slot that could hold
+        // it, so both halves of the clause are re-anchored onto the tracked set
+        // the pick publishes. Applied here — this loop's single `Emit` site —
+        // because the repair rewrites the CONDITION and the already-parsed GRANT
+        // BODY together; anywhere earlier there is no parsed body to read the
+        // granted keyword off. A `None` result leaves the condition exactly as
+        // the passes above settled it, so the three working binding classes are
+        // untouched.
+        let mut condition = condition;
+        if rebind_keyword_anaphor_to_resolution_pick_tracked_set(
+            condition.as_ref(),
+            &mut clause,
+            builder.clauses(),
+        ) {
+            condition = None;
         }
 
         // CR 115.1 + CR 701.9b: `target_selection_mode` snapshots the parser's

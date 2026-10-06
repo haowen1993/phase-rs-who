@@ -2001,19 +2001,23 @@ pub(crate) fn graveyard_exile_rider_entry_counters(
     };
     let mut rider = sub.clone();
     rider.targets = vec![TargetRef::Object(obj_id)];
-    let base: Vec<(crate::types::counter::CounterType, u32)> = enter_with_counters
-        .iter()
-        .map(|(counter_type, quantity)| {
-            let n = crate::game::quantity::resolve_quantity_with_targets(state, quantity, &rider)
-                .max(0) as u32;
-            (counter_type.clone(), n)
-        })
-        .collect();
+    // CR 608.2c: TWO reference axes have to be bound for this rider's counts, and
+    // they are independent:
+    //   * `ObjectScope::Target` ("with X time counters on it, where X is its mana
+    //     value", `QuantityRef::ObjectManaValue { Target }`) reads the ability's
+    //     first object target, which the clone above supplies — a sub-ability
+    //     starts with no targets of its own.
+    //   * `ObjectScope::Recipient` reads the object the counters are landing on,
+    //     which `change_zone::enter_with_counters_for_object` binds from the
+    //     `obj_id` it is handed.
+    // The second axis is why the counts are no longer resolved here: the shared
+    // authority resolves every expression per moved object, so this function hands
+    // it the printed expressions rather than pre-baked numbers.
     super::change_zone::enter_with_counters_for_object(
         state,
         &rider,
         obj_id,
-        &base,
+        &super::change_zone::resolve_enter_counter_specs(state, &rider, enter_with_counters),
         conditional_enter_with_counters,
     )
 }

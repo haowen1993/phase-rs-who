@@ -677,19 +677,13 @@ pub fn resolve(
             enters_modified_if,
             ..
         } => {
-            // CR 122.1 + CR 614.1c: Resolve `QuantityExpr` counts to concrete
-            // u32 values up front so the zone-move pipeline carries fully-
-            // resolved counts (matches the Token resolver pattern at
-            // `effects/token.rs:400`).
-            let resolved_counters: Vec<(CounterType, u32)> = enter_with_counters
-                .iter()
-                .map(|(ct, qty)| {
-                    let n =
-                        crate::game::quantity::resolve_quantity_with_targets(state, qty, ability)
-                            .max(0) as u32;
-                    (ct.clone(), n)
-                })
-                .collect();
+            // CR 122.1 + CR 614.1c + CR 608.2c: Split the entry counters by
+            // answerability. Everything that does not read the moved object is
+            // resolved now, exactly as before; only an `ObjectScope::Recipient`
+            // count ("a number of time counters on it equal to its mana value")
+            // is carried as an expression, because its referent does not exist
+            // until a resolution-time pick is answered.
+            let counters = resolve_enter_counter_specs(state, ability, enter_with_counters);
             // CR 110.2a: Resolve the controller-override `ControllerRef` to a
             // concrete `PlayerId` exactly once at resolver entry, then carry
             // the resolved `Option<PlayerId>` through the iteration ctx and
@@ -710,7 +704,7 @@ pub fn resolve(
                 *enter_tapped,
                 *enters_attacking,
                 *up_to,
-                resolved_counters,
+                counters,
                 conditional_enter_with_counters.clone(),
                 face_down_profile.clone(),
                 enters_modified_if.clone(),
@@ -1352,26 +1346,21 @@ pub fn resolve(
                     .get(obj_id)
                     .is_some_and(|object| object.zone == dest_zone)
         };
-        let per_obj_ctx = ChangeZoneIterationCtx {
-            enter_with_counters: enter_with_counters_for_object(
-                state,
-                ability,
-                *obj_id,
-                &effect_enter_with_counters,
-                &effect_conditional_enter_with_counters,
-            ),
-            ..ctx.clone()
-        };
+        // CR 122.1 + CR 608.2c: no per-object ctx is built here. The shared ctx
+        // already carries the printed counter EXPRESSIONS, and
+        // `process_one_zone_move_with_terminal` resolves them with this object
+        // bound as the `ObjectScope::Recipient` — the one seam that knows which
+        // object is moving.
         let anticipated_pause = anticipated_zone_change_delivery(
             state,
             *obj_id,
-            per_obj_ctx.destination,
-            per_obj_ctx.source_id,
-            per_obj_ctx.face_down_in_exile,
+            ctx.destination,
+            ctx.source_id,
+            ctx.face_down_in_exile,
         );
         let delivery_start = events.len();
         let stack_depth_before_zone_move = state.resolution_stack.capture_child_boundary();
-        match process_one_zone_move_with_terminal(state, &per_obj_ctx, *obj_id, events) {
+        match process_one_zone_move_with_terminal(state, &ctx, *obj_id, events) {
             crate::game::zone_pipeline::ZoneMoveTerminalResult::Completed(completion) => {
                 logical_zone_change_group
                     .record_delivery_completion(*obj_id, completion)
@@ -1560,28 +1549,118 @@ pub(crate) fn count_selected_zone_arrivals(
         .count()
 }
 
-/// CR 122.1 + CR 614.1c: Merge unconditional and conditional entry-time counters
-/// for one object about to enter via `ChangeZone`.
+/// CR 122.1 + CR 614.1c + CR 608.2c: The complete entry-counter set for ONE
+/// object about to enter via `ChangeZone` — the unconditional
+/// [`EnterCounterSpec`]s plus any `conditional_enter_with_counters` rider whose
+/// filter the object matches.
+///
+/// The split is by ANSWERABILITY, and it is the whole reason the spec type
+/// exists:
+///
+///   * A count that does not depend on the moved object (the overwhelming
+///     majority: a `Fixed` "enters with two +1/+1 counters", a board count, …)
+///     has one answer for the whole resolution, so it is resolved ONCE at
+///     resolver entry and carried as a plain number. That keeps the
+///     pause/resume carriers free of ability plumbing and keeps every existing
+///     card byte-identical.
+///   * A count whose expression reads `ObjectScope::Recipient` ("a number of
+///     time counters on it equal to its mana value" — The Eleventh Doctor,
+///     Amy's Home) names the object being moved, which for a resolution-time
+///     pick does not exist until the player answers the prompt. Resolving it
+///     early is not merely premature, it is unanswerable: `ObjectScope::
+///     Recipient`'s fallback ladder (`game/quantity.rs`, `object_for_scope`)
+///     walks recipient → first object target (empty for an untargeted pick) →
+///     `ctx.entering` (unset outside an ETB replacement) → the ability SOURCE,
+///     so the count silently becomes the SOURCE's mana value. Such a count is
+///     therefore carried UNRESOLVED and answered here, per object.
 pub(crate) fn enter_with_counters_for_object(
     state: &GameState,
     ability: &ResolvedAbility,
     obj_id: ObjectId,
-    base: &[(CounterType, u32)],
+    base: &[EnterCounterSpec],
     conditional: &[(TargetFilter, CounterType, QuantityExpr)],
 ) -> Vec<(CounterType, u32)> {
-    let mut counters = base.to_vec();
+    let mut counters: Vec<(CounterType, u32)> = base
+        .iter()
+        .map(|spec| match spec {
+            EnterCounterSpec::Resolved {
+                counter_type,
+                count,
+            } => (counter_type.clone(), *count),
+            EnterCounterSpec::PerObject { counter_type, expr } => (
+                counter_type.clone(),
+                crate::game::quantity::resolve_quantity_with_targets_and_recipient(
+                    state, expr, ability, obj_id,
+                )
+                .max(0) as u32,
+            ),
+        })
+        .collect();
     if conditional.is_empty() {
         return counters;
     }
     let ctx = crate::game::filter::FilterContext::from_ability(ability);
     for (filter, counter_type, count) in conditional {
         if crate::game::filter::matches_target_filter(state, obj_id, filter, &ctx) {
-            let n = crate::game::quantity::resolve_quantity_with_targets(state, count, ability)
-                .max(0) as u32;
+            let n = crate::game::quantity::resolve_quantity_with_targets_and_recipient(
+                state, count, ability, obj_id,
+            )
+            .max(0) as u32;
             counters.push((counter_type.clone(), n));
         }
     }
     counters
+}
+
+/// CR 122.1 + CR 614.1c: One unconditional entry-counter spec, split by whether
+/// its count is answerable before the moved object is known. See
+/// [`enter_with_counters_for_object`] for the why.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
+pub(crate) enum EnterCounterSpec {
+    /// The count has one answer for the whole resolution; already resolved.
+    Resolved {
+        counter_type: CounterType,
+        count: u32,
+    },
+    /// The count reads `ObjectScope::Recipient`, so it is answered per moved
+    /// object.
+    PerObject {
+        counter_type: CounterType,
+        expr: QuantityExpr,
+    },
+}
+
+/// CR 122.1 + CR 614.1c + CR 608.2c: Lower `Effect::ChangeZone`'s printed
+/// entry-counter expressions into [`EnterCounterSpec`]s — resolving everything
+/// that does not read the moved object, and deferring everything that does.
+/// Single authority for the split, so the single-object arm, the mass arm and
+/// the `EffectZoneChoice` carrier cannot disagree about which counts are
+/// per-object.
+pub(crate) fn resolve_enter_counter_specs(
+    state: &GameState,
+    ability: &ResolvedAbility,
+    enter_with_counters: &[(CounterType, QuantityExpr)],
+) -> Vec<EnterCounterSpec> {
+    enter_with_counters
+        .iter()
+        .map(|(counter_type, expr)| {
+            if crate::game::quantity::quantity_expr_uses_recipient(expr) {
+                EnterCounterSpec::PerObject {
+                    counter_type: counter_type.clone(),
+                    expr: expr.clone(),
+                }
+            } else {
+                EnterCounterSpec::Resolved {
+                    counter_type: counter_type.clone(),
+                    count: crate::game::quantity::resolve_quantity_with_targets(
+                        state, expr, ability,
+                    )
+                    .max(0) as u32,
+                }
+            }
+        })
+        .collect()
 }
 
 /// Resolve the ability currently driving a `ChangeZone` pause/resume for
@@ -1605,22 +1684,38 @@ pub(crate) fn resolving_stack_ability_for_source(
         .cloned()
 }
 
-/// Merge unconditional and conditional entry counters for one object during a
-/// paused multi-object `ChangeZone` resume.
+/// Entry counters for one object during a paused `ChangeZone` resume.
+/// Counterpart of [`enter_with_counters_for_object`] for the pause/resume path,
+/// where the resolving ability is recovered from the stack object that owns the
+/// resolution (`resolving_stack_ability_for_source`) because the parked frame
+/// carries specs, not the ability.
+///
+/// When no ability is recoverable — a state restored without its stack object,
+/// or a unit-level frame with no backing entry — a [`EnterCounterSpec::Resolved`]
+/// count still carries its own answer and is stamped; a
+/// [`EnterCounterSpec::PerObject`] count has none, and the only alternative to
+/// dropping it would be to resolve its `ObjectScope::Recipient` against a
+/// fallback the player never named. Dropping it is the honest answer, and it is
+/// what this path did before such specs existed.
 pub(crate) fn enter_with_counters_for_pending_object(
     state: &GameState,
     source_id: ObjectId,
     obj_id: ObjectId,
-    base: &[(CounterType, u32)],
+    base: &[EnterCounterSpec],
     conditional: &[(TargetFilter, CounterType, QuantityExpr)],
 ) -> Vec<(CounterType, u32)> {
-    if base.is_empty() && conditional.is_empty() {
-        return vec![];
-    }
-    if let Some(ability) = resolving_stack_ability_for_source(state, source_id) {
-        enter_with_counters_for_object(state, &ability, obj_id, base, conditional)
-    } else {
-        base.to_vec()
+    match resolving_stack_ability_for_source(state, source_id) {
+        Some(ability) => enter_with_counters_for_object(state, &ability, obj_id, base, conditional),
+        None => base
+            .iter()
+            .filter_map(|spec| match spec {
+                EnterCounterSpec::Resolved {
+                    counter_type,
+                    count,
+                } => Some((counter_type.clone(), *count)),
+                EnterCounterSpec::PerObject { .. } => None,
+            })
+            .collect(),
     }
 }
 
@@ -1643,7 +1738,12 @@ pub(crate) struct ChangeZoneIterationCtx {
     /// `Effect::ChangeZone.enters_under` at resolver entry.
     pub enters_under_player: Option<PlayerId>,
     pub enters_attacking: bool,
-    pub enter_with_counters: Vec<(CounterType, u32)>,
+    /// CR 122.1 + CR 614.1c + CR 608.2c: Entry-counter specs. Counts that do not
+    /// read the moved object arrive already resolved; the rest stay as
+    /// expressions for [`enter_with_counters_for_object`] to answer per object —
+    /// see that function for why resolving those any earlier answers the wrong
+    /// object.
+    pub enter_with_counters: Vec<EnterCounterSpec>,
     #[allow(dead_code)]
     // carried for resume ctx parity; merged into enter_with_counters at move time
     pub conditional_enter_with_counters: Vec<(TargetFilter, CounterType, QuantityExpr)>,
@@ -1775,6 +1875,18 @@ pub(crate) fn process_one_zone_move_with_terminal(
         ctx.enters_attacking,
         ctx.enters_modified_if.as_ref(),
     );
+    // CR 122.1 + CR 614.1c + CR 608.2c: resolve THIS object's entry counters
+    // here, at the one seam that knows which object is moving. The ctx carries
+    // the printed expressions rather than counts, because a
+    // `ObjectScope::Recipient` count names the object being moved and that is
+    // only knowable now — see `enter_with_counters_for_object`.
+    let enter_with_counters = enter_with_counters_for_pending_object(
+        state,
+        ctx.source_id,
+        obj_id,
+        &ctx.enter_with_counters,
+        &ctx.conditional_enter_with_counters,
+    );
     let result = crate::game::zone_pipeline::execute_zone_move_with_terminal_and_controller(
         state,
         obj_id,
@@ -1786,7 +1898,7 @@ pub(crate) fn process_one_zone_move_with_terminal(
         eff_tapped,
         eff_attacking,
         ctx.enters_under_player,
-        &ctx.enter_with_counters,
+        &enter_with_counters,
         ctx.face_down_profile.as_ref(),
         ctx.face_down_in_exile,
         ctx.track_exiled_by_source,
@@ -1971,19 +2083,11 @@ pub fn resolve_all(
             random_order,
         } => {
             let scan_zones = change_zone_all_origin_zones(state, *origin, target);
-            // CR 122.1 + CR 122.1h: Resolve each `QuantityExpr` counter count
-            // to a concrete u32 once, mirroring the single-object `ChangeZone`
-            // arm. Every entering object receives these counters (e.g. a
-            // finality counter on Shilgengar's mass return).
-            let resolved_counters: Vec<(CounterType, u32)> = enter_with_counters
-                .iter()
-                .map(|(ct, qty)| {
-                    let n =
-                        crate::game::quantity::resolve_quantity_with_targets(state, qty, ability)
-                            .max(0) as u32;
-                    (ct.clone(), n)
-                })
-                .collect();
+            // CR 122.1 + CR 122.1h + CR 608.2c: Same answerability split as the
+            // single-object arm — a `Fixed` count (Shilgengar's finality counter)
+            // resolves once here, only a recipient-reading count defers.
+            let resolved_counters =
+                resolve_enter_counter_specs(state, ability, enter_with_counters);
             (
                 scan_zones,
                 *destination,
@@ -2310,7 +2414,11 @@ pub fn resolve_all(
             enter_tapped,
             enters_attacking,
             enters_under_player,
-            &enter_with_counters,
+            // CR 122.1 + CR 608.2c: resolve THIS object's counters with itself
+            // bound as the recipient (see `enter_with_counters_for_object`).
+            // `Effect::ChangeZoneAll` prints no conditional rider, so there is
+            // none to pass.
+            &enter_with_counters_for_object(state, ability, obj_id, &enter_with_counters, &[]),
             face_down_profile.as_ref(),
             ability.context.face_down_in_exile,
             track_exiled_by_source,
@@ -3110,6 +3218,29 @@ mod tests {
                 ObjectId(100),
                 PlayerId(0),
             );
+            // Production resolution pops the stack entry into
+            // `resolving_stack_entry` before the effect runs
+            // (`effects::drain_pending_change_zone_iteration` relies on it to
+            // recover the resolving ability for per-object entry counters). A
+            // bare `resolve()` call has no such entry, and the conditional rider
+            // would be dropped for want of an ability to evaluate its filter
+            // with. Mirror production rather than weakening the lookup.
+            state.resolving_stack_entry = Some(StackEntry {
+                id: ObjectId(101),
+                controller: PlayerId(0),
+                source_id: ObjectId(100),
+                kind: StackEntryKind::TriggeredAbility {
+                    source_id: ObjectId(100),
+                    ability: Box::new(ability.clone()),
+                    condition: None,
+                    trigger_event: None,
+                    description: None,
+                    source_name: String::new(),
+                    subject_match_count: None,
+                    die_result: None,
+                    provenance: None,
+                },
+            });
             let mut events = Vec::new();
             resolve(&mut state, &ability, &mut events).unwrap();
             assert!(state.battlefield.contains(&entering));

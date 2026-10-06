@@ -849,15 +849,35 @@ fn register_transient_effect(
             }
             let filter = crate::game::effects::resolved_object_filter(state, ability, filter);
             let filter = crate::game::targeting::resolve_tracked_set_sentinel(state, filter);
-            // Broadcast filter: find matching objects at resolution time and bind each.
             // CR 107.3a + CR 601.2b: ability-context filter evaluation.
             let ctx = filter::FilterContext::from_ability(ability);
-            let matching: Vec<ObjectId> = state
-                .battlefield
-                .iter()
-                .filter(|obj_id| filter::matches_target_filter(state, **obj_id, &filter, &ctx))
-                .copied()
-                .collect();
+            // CR 608.2c + CR 400.7: a filter scoped to a TRACKED SET names a
+            // resolution-local population, not a board population — its members
+            // live wherever the instruction that published them put them, which
+            // for the exiled-card class ("cards exiled this way gain suspend",
+            // The Eleventh Doctor / Amy's Home) is the exile zone the
+            // battlefield broadcast below can never scan. Enumerate the SET and
+            // test each member with the same matcher the battlefield path uses,
+            // so set membership, the nested predicate, and the `caused_by`
+            // producer-action stamp are all consulted by one authority
+            // (`filter::matches_target_filter`). The tracked-set members are
+            // spelled out here rather than unioned with the battlefield scan:
+            // a set selector is a closed domain, so no non-member can be
+            // reached by accident.
+            let matching: Vec<ObjectId> = if let TargetFilter::TrackedSet { .. }
+            | TargetFilter::TrackedSetFiltered { .. } = filter
+            {
+                crate::game::targeting::resolved_object_ids_for_filter_with_context(
+                    state, ability, &filter, &ctx,
+                )
+            } else {
+                state
+                    .battlefield
+                    .iter()
+                    .filter(|obj_id| filter::matches_target_filter(state, **obj_id, &filter, &ctx))
+                    .copied()
+                    .collect()
+            };
             for obj_id in matching {
                 install_transient(
                     state,

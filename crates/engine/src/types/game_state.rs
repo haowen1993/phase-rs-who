@@ -4103,8 +4103,13 @@ pub struct PendingChangeZoneIteration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enters_under_player: Option<PlayerId>,
     pub enters_attacking: bool,
+    /// CR 122.1 + CR 614.1c + CR 608.2c: Unconditional entry-counter specs
+    /// carried across a pause. Counts that do not read the moved object arrive
+    /// resolved; a recipient-reading one stays an expression and is answered per
+    /// remaining object on resume
+    /// (`change_zone::enter_with_counters_for_object`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub enter_with_counters: Vec<(crate::types::counter::CounterType, u32)>,
+    pub enter_with_counters: Vec<crate::game::effects::change_zone::EnterCounterSpec>,
     /// Conditional entry-counter specs carried across a pause so each remaining
     /// object can be re-evaluated per-object on resume (Winter Soldier Hero
     /// rider through `EffectZoneChoice`).
@@ -14770,11 +14775,15 @@ pub enum WaitingFor {
         /// `enter_transformed` / `enters_under_player` carry-through above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         face_down_profile: Option<crate::types::ability::FaceDownProfile>,
-        /// CR 122.1 + CR 614.1c: Unconditional entry-time counters carried across
-        /// the `EffectZoneChoice` round-trip (e.g. "enters with two +1/+1
-        /// counters").
+        /// CR 122.1 + CR 614.1c + CR 608.2c: Unconditional entry-time counter
+        /// specs carried across the `EffectZoneChoice` round-trip. Counts that
+        /// do not read the moved object arrive resolved; an
+        /// `ObjectScope::Recipient` count ("a number of time counters on it
+        /// equal to its mana value" — The Eleventh Doctor, Amy's Home) stays an
+        /// expression, because it names the card the player has not picked yet
+        /// (`change_zone::enter_with_counters_for_object`).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        enter_with_counters: Vec<(CounterType, u32)>,
+        enter_with_counters: Vec<crate::game::effects::change_zone::EnterCounterSpec>,
         /// CR 122.1 + CR 614.1c: Conditional entry-time counter specs carried
         /// across the `EffectZoneChoice` round-trip (e.g. "If a Hero enters
         /// this way, it enters with an additional +1/+1 counter on it").

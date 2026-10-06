@@ -1,7 +1,7 @@
 From 285606b618de3d1c1c8fd82c34281913ad18ebb5 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Tue, 6 Oct 2026 21:46:21 +0800
-Subject: [PATCH 5/5] fix(engine): widen EnterCounterSpec to the visibility its
+Subject: [PATCH 5/6] fix(engine): widen EnterCounterSpec to the visibility its
  carriers require
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

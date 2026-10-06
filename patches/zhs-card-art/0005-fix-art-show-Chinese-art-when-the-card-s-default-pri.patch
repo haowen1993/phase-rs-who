@@ -1,4 +1,4 @@
-From ead66d4cc5f0d75691e3ac394b21264ad83595a3 Mon Sep 17 00:00:00 2001
+From e905a94a6a2cce466282d2901e0f54793f71d3b2 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 00:47:48 +0800
 Subject: [PATCH 5/7] fix(art): show Chinese art when the card's default

@@ -1,4 +1,4 @@
-From 4cae3d94aaed9b50409e2e2e75f47a34e2dd22aa Mon Sep 17 00:00:00 2001
+From 51640465407d880baa9a766972005311201f0cf2 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 00:13:34 +0800
 Subject: [PATCH 3/7] fix(art): attach the derived locale's English rung at the

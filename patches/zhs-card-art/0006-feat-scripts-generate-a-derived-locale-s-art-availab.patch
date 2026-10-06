@@ -1,4 +1,4 @@
-From 3a96364625f251b6ace1b7254dc4ac5fc94e4aba Mon Sep 17 00:00:00 2001
+From 0831d084525895a6d708b8ae6e50abc3561157a3 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 00:48:52 +0800
 Subject: [PATCH 6/7] feat(scripts): generate a derived locale's

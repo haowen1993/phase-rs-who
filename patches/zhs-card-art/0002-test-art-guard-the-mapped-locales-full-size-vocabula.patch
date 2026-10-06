@@ -1,4 +1,4 @@
-From 33b0a4aba2ac14fe317fb44640fc12a4a7bc35fd Mon Sep 17 00:00:00 2001
+From 5e2f5336f2b5f2cb5859b3ed8a867b72381522e1 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Sun, 4 Oct 2026 12:59:20 +0800
 Subject: [PATCH 2/7] test(art): guard the mapped locales' full size vocabulary

@@ -2698,6 +2698,44 @@ fn inject_owner_you_filter_prop(filter: TargetFilter) -> Option<TargetFilter> {
     }
 }
 
+/// CR 614.1a + CR 611.2a + CR 607.1: strip the trailing reflexive rider
+/// "If you do, it gains \"If this permanent would leave the battlefield, exile it
+/// instead of putting it anywhere else.\"" (The Eighth Doctor).
+///
+/// Returns the permission clause with the rider removed, plus whether a rider
+/// was present. The rider text is not returned: it is ONE fixed printed
+/// sentence, so the definition it lowers to is rebuilt from the single-authority
+/// `leave_battlefield_exile_replacement` constructor at the point of use rather
+/// than carried through the parse.
+///
+/// Refuses (`None`) when "if you do, it gains" is present but what follows is not
+/// that rider. An unmodeled rider must keep the clause unimplemented rather than
+/// be discarded — that refusal is the whole reason this shape was gated before
+/// the permission had a slot to record it in.
+fn strip_leave_battlefield_grant_rider(lower: &str) -> Option<(&str, bool)> {
+    let Some((head, rider)) = nom_primitives::split_once_on(lower, "if you do, it gains ")
+        .ok()
+        .map(|(_, pair)| pair)
+    else {
+        // No rider at all: keep the whole clause, and record nothing — the flag
+        // must track the rider's PRESENCE, not its absence.
+        return Some((lower, false));
+    };
+    // Strip BOTH quotes: the detector's trailing end-check rejects a closing
+    // quote after the period, and only the leading one is structural. The rider
+    // reaches us unnormalized — the card-wide `normalize_card_name_refs` pass
+    // that rewrites "this permanent" to `~` runs on the ability body, not here —
+    // so normalize the self-reference before handing it to the shared detector,
+    // which matches `~` first by design.
+    let rider = rider.trim().trim_matches('"').trim();
+    let normalized = rider
+        .replace("this permanent", "~")
+        .replace("this creature", "~")
+        .replace("this land", "~");
+    super::super::oracle_effect::try_parse_leave_battlefield_exile_replacement(&normalized)?;
+    Some((head.trim_end(), true))
+}
+
 /// CR 305.1 + CR 601.2a + CR 700.6: Parse the disjunctive once-per-turn
 /// graveyard play/cast permission — "Once during each of your turns, you may
 /// play a <land-filter> or cast a <spell-filter> from your graveyard." — into a
@@ -2738,9 +2776,11 @@ fn try_parse_disjunctive_graveyard_cast_permission(
     .or_else(|| {
         nom_tag_lower(lower, lower, "once each turn, you may play ").map(|rest| (rest, false))
     })?;
-    if nom_primitives::scan_contains(rest, "if you do, it gains") {
-        return None;
-    }
+    // CR 614.1a + CR 611.2a: the trailing reflexive rider is carried by the
+    // permission as `leave_battlefield_replacement`, so the permission and the
+    // granted replacement ship together. An UNMODELED rider still declines — see
+    // the helper — so this class keeps its honest coverage gap.
+    let (rest, grants_leave_battlefield_exile) = strip_leave_battlefield_grant_rider(rest)?;
 
     // CR 305.1 + CR 601.2a: The disjunction connector " or cast " splits the
     // land-play branch from the spell-cast branch. `split_once_on` is the
@@ -2820,12 +2860,12 @@ fn try_parse_disjunctive_graveyard_cast_permission(
         frequency: CastFrequency::OncePerTurn,
         // CR 305.1: `Play` covers both the land-play and spell-cast branches.
         play_mode: CardPlayMode::Play,
+        leave_battlefield_replacement: grants_leave_battlefield_exile,
         // Stack-exit redirect is wrong for the granted leave-battlefield
         // rider (see doc comment); leave it unset.
         graveyard_destination_replacement: None,
         extra_cost: None,
         enters_with_counter: None,
-        leave_battlefield_replacement: false,
         required_cast_keyword: None,
         pool: GraveyardPermissionPool::OwnGraveyard,
     })

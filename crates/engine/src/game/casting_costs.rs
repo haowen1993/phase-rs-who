@@ -12302,6 +12302,39 @@ fn finalize_cast_with_phyrexian_choices_inner(
             .push((object_id, counter_type, 1));
     }
 
+    // CR 614.1a + CR 611.2a + CR 607.1: "If you do, it gains 'If this permanent
+    // would leave the battlefield, exile it instead of putting it anywhere
+    // else.'" (The Eighth Doctor). The permission carries the rider; install it
+    // on the permanent that was cast through it, as a `Duration::Permanent`
+    // continuous effect scoped to that one object (CR 611.2c), which is the same
+    // delivery `enters_with_counter` uses above.
+    //
+    // CR 611.2a: a granted replacement's lifetime is governed by the granting
+    // effect, so this uses the UNSTAMPED single-authority constructor. The
+    // handler's own `AddTargetReplacement` payload carries
+    // `RestrictionExpiry::UntilHostLeavesPlay`, which would make the granted
+    // rider outlive the grant.
+    let static_perm_leave_battlefield = match &graveyard_permission_latch {
+        Some(latch) => latch.leave_battlefield_replacement,
+        None => false,
+    };
+    if static_perm_leave_battlefield {
+        state.add_transient_continuous_effect(
+            object_id,
+            player,
+            crate::types::ability::Duration::Permanent,
+            crate::types::ability::TargetFilter::SpecificObject { id: object_id },
+            vec![
+                crate::types::ability::ContinuousModification::GrantReplacement {
+                    replacement: Box::new(
+                        crate::parser::oracle_effect::leave_battlefield_exile_replacement(),
+                    ),
+                },
+            ],
+            None,
+        );
+    }
+
     // CR 205.1b + CR 613.1d: A `CastFromZone` grant whose rider was "… is a
     // [type] in addition to its other types" (The Tomb of Aclazotz) records the
     // additive type-changing modifications on the granted `ExileWithAltCost`.

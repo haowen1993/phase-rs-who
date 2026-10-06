@@ -5006,6 +5006,11 @@ struct GraveyardPermissionSource<'a> {
     /// the `finalize_cast` seam by `selected_static_permission_enters_with_counter`;
     /// carried here so permission selection can see every rider a choice brings.
     enters_with_counter: &'a Option<crate::types::counter::CounterType>,
+    /// CR 614.1a + CR 607.1: Optional "If you do, it gains 'If this permanent
+    /// would leave the battlefield, exile it instead'" rider (The Eighth Doctor).
+    /// Borrowed from the static definition like `enters_with_counter`, and applied
+    /// at the same `finalize_cast` seam.
+    leave_battlefield_replacement: &'a bool,
     /// CR 118.9b: the casting method this permission requires ("using its
     /// blitz ability"), or `None` when it leaves the method open, including the
     /// printed cost.
@@ -5627,9 +5632,9 @@ fn graveyard_permission_sources(
                         // Applied at the finalize_cast seam from the cast's
                         // latched terms; carried here so the menu shows it.
                         ref enters_with_counter,
-                        leave_battlefield_replacement: _,
                         required_cast_keyword,
                         pool,
+                        ..
                     } if graveyard_permission_play_mode_matches(play_mode, play_mode_filter) => {
                         definition
                             .affected
@@ -5648,6 +5653,13 @@ fn graveyard_permission_sources(
                                 graveyard_destination_replacement,
                                 extra_cost,
                                 enters_with_counter,
+                                leave_battlefield_replacement: match &definition.mode {
+                                    StaticMode::GraveyardCastPermission {
+                                        leave_battlefield_replacement,
+                                        ..
+                                    } => leave_battlefield_replacement,
+                                    _ => &false,
+                                },
                                 required_cast_keyword,
                                 pool,
                             })
@@ -5752,9 +5764,9 @@ fn transient_graveyard_permission_sources(
                         graveyard_destination_replacement,
                         ref extra_cost,
                         ref enters_with_counter,
-                        leave_battlefield_replacement: _,
                         required_cast_keyword,
                         pool,
+                        ..
                     } = definition.mode
                     else {
                         return None;
@@ -5801,6 +5813,13 @@ fn transient_graveyard_permission_sources(
                             graveyard_destination_replacement,
                             extra_cost,
                             enters_with_counter,
+                            leave_battlefield_replacement: match &definition.mode {
+                                StaticMode::GraveyardCastPermission {
+                                    leave_battlefield_replacement,
+                                    ..
+                                } => leave_battlefield_replacement,
+                                _ => &false,
+                            },
                             required_cast_keyword,
                             pool,
                         })
@@ -6063,6 +6082,7 @@ impl GraveyardCastAuthority {
                 permission: source.permission,
                 extra_cost: source.extra_cost.clone(),
                 enters_with_counter: source.enters_with_counter.clone(),
+                leave_battlefield_replacement: *source.leave_battlefield_replacement,
             },
         }
     }
@@ -6081,6 +6101,7 @@ impl GraveyardCastAuthority {
             announcement: self.announcement.clone(),
             extra_cost: self.latch.extra_cost.clone(),
             enters_with_counter: self.latch.enters_with_counter.clone(),
+            leave_battlefield_replacement: self.latch.leave_battlefield_replacement,
             frequency,
             graveyard_destination_replacement,
         }

@@ -15180,12 +15180,37 @@ fn graveyard_cast_permission_muldrotha_legacy_and() {
     ));
 }
 
+/// CR 614.1a + CR 607.1: the granted leave-battlefield replacement IS modeled
+/// now — the permission records it as `leave_battlefield_replacement` — so this
+/// line parses instead of strict-failing. Shape assertions live in
+/// `eighth_doctor_disjunctive_permission_carries_the_leave_battlefield_rider`.
 #[test]
-fn graveyard_cast_permission_disjunctive_rejects_unmodeled_granted_rider() {
+fn graveyard_cast_permission_disjunctive_accepts_the_modeled_granted_rider() {
     let text = "Once during each of your turns, you may play a historic land or cast a historic permanent spell from your graveyard. If you do, it gains \"If ~ would leave the battlefield, exile it instead of putting it anywhere else.\"";
+    let def = parse_static_line(text).expect("the modeled rider parses");
+    assert!(
+        matches!(
+            def.mode,
+            StaticMode::GraveyardCastPermission {
+                leave_battlefield_replacement: true,
+                ..
+            }
+        ),
+        "the rider must be recorded on the permission, got {:?}",
+        def.mode
+    );
+}
+
+/// The refusal above was never about THIS rider in particular — it was about
+/// dropping rules text. A rider this parser does not model must therefore still
+/// decline, so the class keeps its honest coverage gap.
+#[test]
+fn graveyard_cast_permission_disjunctive_rejects_an_unmodeled_granted_rider() {
+    let text = "Once during each of your turns, you may play a historic land or cast a historic permanent spell from your graveyard. If you do, it gains \"This permanent is a Dalek in addition to its other types.\"";
     assert!(
         parse_static_line(text).is_none(),
-        "unmodeled granted leave-battlefield replacement must remain an honest coverage gap"
+        "an unmodeled granted rider must remain an honest coverage gap rather \
+         than being dropped while coverage reports support"
     );
 }
 
@@ -15325,6 +15350,70 @@ fn disjunctive_graveyard_permission_classifies_static_not_replacement() {
     assert!(
         crate::parser::oracle_classifier::is_static_pattern(lower),
         "disjunctive once-per-turn permission must classify as static"
+    );
+}
+
+/// CR 604.2 + CR 614.1a + CR 607.1: The Eighth Doctor's full line parses as ONE
+/// `GraveyardCastPermission` whose `leave_battlefield_replacement` records the
+/// trailing reflexive rider.
+///
+/// The rider is why this line was refused before the permission had a slot for
+/// it: the permission half parses on its own, so accepting it with nowhere to
+/// put the rider would report the card supported while dropping "…would leave
+/// the battlefield, exile it instead".
+#[test]
+fn eighth_doctor_disjunctive_permission_carries_the_leave_battlefield_rider() {
+    let text = "Once during each of your turns, you may play a historic land or cast a \
+                historic permanent spell from your graveyard. If you do, it gains \"If this \
+                permanent would leave the battlefield, exile it instead of putting it \
+                anywhere else.\"";
+    let def = parse_static_line(text).expect("the line parses as a static ability");
+    let StaticMode::GraveyardCastPermission {
+        frequency,
+        play_mode,
+        graveyard_destination_replacement,
+        leave_battlefield_replacement,
+        ..
+    } = &def.mode
+    else {
+        panic!("expected a graveyard cast permission, got {:?}", def.mode);
+    };
+    assert_eq!(*frequency, CastFrequency::OncePerTurn);
+    assert_eq!(*play_mode, CardPlayMode::Play);
+    // CR 614.1a: the rider redirects a BATTLEFIELD exit, not the stack exit that
+    // `graveyard_destination_replacement` models.
+    assert_eq!(*graveyard_destination_replacement, None);
+    assert!(
+        *leave_battlefield_replacement,
+        "the rider must be recorded, not dropped"
+    );
+    let affected = def
+        .affected
+        .as_ref()
+        .expect("the permission names its cards");
+    assert!(
+        format!("{affected:?}").to_lowercase().contains("historic"),
+        "the historic restriction must reach the filter, got {affected:?}"
+    );
+}
+
+/// Negative control: the same permission WITHOUT the rider still parses and
+/// records no rider — the flag tracks the rider's presence, not its absence.
+#[test]
+fn disjunctive_permission_without_the_rider_records_no_leave_battlefield_grant() {
+    let text = "Once during each of your turns, you may play a historic land or cast a \
+                historic permanent spell from your graveyard.";
+    let def = parse_static_line(text).expect("the bare permission parses");
+    let StaticMode::GraveyardCastPermission {
+        leave_battlefield_replacement,
+        ..
+    } = &def.mode
+    else {
+        panic!("expected a graveyard cast permission, got {:?}", def.mode);
+    };
+    assert!(
+        !*leave_battlefield_replacement,
+        "no rider was printed, so no rider may be recorded"
     );
 }
 

@@ -9915,6 +9915,12 @@ pub struct GraveyardPermissionLatch {
     pub extra_cost: Option<crate::types::statics::CastExtraCost>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enters_with_counter: Option<crate::types::counter::CounterType>,
+    /// CR 614.1a + CR 611.2a: the permission's granted leave-battlefield exile
+    /// rider, latched with the rest of its terms at announcement so a source that
+    /// leaves mid-payment still grants it (CR 601.2b). Applied at the
+    /// `finalize_cast` seam, exactly like `enters_with_counter`.
+    #[serde(default, skip_serializing_if = "crate::types::statics::is_false")]
+    pub leave_battlefield_replacement: bool,
 }
 
 /// The engine-authored authority of a graveyard casting option: the
@@ -9926,6 +9932,8 @@ pub struct CastAuthorityChoice {
     pub extra_cost: Option<crate::types::statics::CastExtraCost>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enters_with_counter: Option<crate::types::counter::CounterType>,
+    #[serde(default, skip_serializing_if = "crate::types::statics::is_false")]
+    pub leave_battlefield_replacement: bool,
     pub frequency: crate::types::statics::CastFrequency,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graveyard_destination_replacement: Option<Zone>,

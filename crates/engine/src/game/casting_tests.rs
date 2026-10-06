@@ -61003,34 +61003,36 @@ fn quantity_vs_each_opponent_skips_a_player_who_left_the_game() {
     );
 }
 
-/// CR 614.1a + CR 611.2a + CR 607.1: The Eighth Doctor's granted rider.
+/// CR 614.1a + CR 611.2a + CR 607.1: The Eighth Doctor's granted rider must
+/// reach the permanent cast through the permission.
 ///
-/// The PARSER half is covered by `eighth_doctor_disjunctive_permission_carries_the_leave_battlefield_rider`.
+/// NOT YET DRIVEN — the cause is measured, and it is NOT the rider.
 ///
-/// This runtime half is NOT YET DRIVEN, and the cause is measured rather than
-/// guessed: the cast itself works (the card reaches the Stack, elected through
-/// the `CastingVariantChoice` menu), but it RESOLVES TO EXILE instead of the
-/// battlefield — so the seam assertion below is unreachable and the test is
-/// `#[ignore]`d rather than left as a false failure.
+/// Eleven rounds of test scaffolding have failed to make this cast resolve. The
+/// cast itself works (the card reaches the Stack, elected through the
+/// `CastingVariantChoice` menu), but the spell always RESOLVES TO EXILE instead
+/// of the battlefield, so the seam assertion is unreachable. That was true for
+/// every card construction tried: hand-built creature, hand-built artifact, and
+/// constructions matching `graveyard_cast_this_way_enters_with_finality_counter`
+/// field for field.
 ///
-/// The missing piece is the test card's construction, not the engine: an ad-hoc
-/// `create_object` card built here lacks the card-face/permanent data the
-/// resolution needs to decide the spell becomes a permanent. Seven field-guessing
-/// rounds failed to find the gap, so the next attempt should start from the
-/// repository's own fixture path (a real card via `add_real_card` /
-/// `integration_cards.json`) rather than hand-building one — see
-/// `graveyard_cast_this_way_enters_with_finality_counter` for a hand-built card
-/// that DOES resolve, and diff its object setup against this one.
+/// The one structural difference from that WORKING test is the permission kind:
+/// it drives a `CastFromZone` grant (`CastingPermission::ExileWithAltCost`),
+/// while this drives a static `StaticMode::GraveyardCastPermission`. So the next
+/// attempt should either
+///   (a) drive this rider through the `CastFromZone` path instead, or
+///   (b) find why the static-permission path sends the resolved permanent to
+///       Exile — which may be a real engine bug rather than a test artifact,
+///       since a graveyard-cast permanent should not be exiled on resolution.
 ///
-/// The seam being proven is the `add_transient_continuous_effect` call in
-/// `casting_costs.rs` (`static_perm_leave_battlefield`).
+/// The discriminating assertion is the installed replacement: reverting the
+/// rider leaves only the permission and the assertion flips.
 #[test]
-#[ignore = "needs a properly built test card: this one resolves to Exile, not the battlefield"]
+#[ignore = "the test cast resolves to Exile, not the battlefield; see the doc comment"]
 fn eighth_doctor_graveyard_cast_installs_the_leave_battlefield_exile_rider() {
     let mut state = setup_game_at_main_phase();
 
-    // The permission, exactly as the parser lowers The Eighth Doctor's line —
-    // including the trailing rider being recorded on the permission.
+    // The permission, exactly as the parser lowers The Eighth Doctor's line.
     let permission_text = "Once during each of your turns, you may play a historic land \
                            or cast a historic permanent spell from your graveyard. If you \
                            do, it gains \"If this permanent would leave the battlefield, \
@@ -61048,55 +61050,59 @@ fn eighth_doctor_graveyard_cast_installs_the_leave_battlefield_exile_rider() {
         permission.mode
     );
 
-    // CR 604.2: the permission functions from its source on the battlefield.
+    // CR 604.2: the permission functions from its source on the battlefield. A
+    // real artifact cannot attack, so combat never interrupts the drive loop.
     let source = create_object(
         &mut state,
         CardId(8_300_001),
         PlayerId(0),
-        "The Eighth Doctor".to_string(),
+        "Coalition Relic".to_string(),
         Zone::Battlefield,
     );
-    {
-        let obj = state.objects.get_mut(&source).unwrap();
-        obj.card_types.core_types.push(CoreType::Artifact);
-        obj.static_definitions = vec![permission].into();
-    }
+    state
+        .objects
+        .get_mut(&source)
+        .expect("source exists")
+        .static_definitions = vec![permission].into();
 
-    // A historic permanent card in the graveyard (CR 700.6: a legendary artifact
-    // is historic), free to cast so the test isolates the rider.
+    // CR 700.6: an artifact creature is historic, and free to cast.
     let card = create_object(
         &mut state,
         CardId(8_300_002),
         PlayerId(0),
-        "Historic Artifact".to_string(),
+        "Ornithopter".to_string(),
         Zone::Graveyard,
     );
     {
         let obj = state.objects.get_mut(&card).unwrap();
-        obj.card_types.core_types = vec![CoreType::Artifact];
-        obj.card_types.supertypes = vec![Supertype::Legendary];
-        obj.base_card_types = obj.card_types.clone();
+        obj.card_types.core_types.push(CoreType::Artifact);
+        obj.card_types.core_types.push(CoreType::Creature);
+        obj.base_power = Some(0);
+        obj.base_toughness = Some(2);
+        obj.power = Some(0);
+        obj.toughness = Some(2);
         obj.mana_cost = ManaCost::zero();
-        obj.base_mana_cost = obj.mana_cost.clone();
     }
+    let card_id = state.objects[&card].card_id;
 
     apply_as_current(
         &mut state,
         GameAction::CastSpell {
             object_id: card,
-            card_id: CardId(8_300_002),
+            card_id,
             targets: vec![],
             payment_mode: CastPaymentMode::Auto,
         },
     )
     .expect("the graveyard permission should authorize this cast");
+
     for _ in 0..12 {
         if state.objects[&card].zone == Zone::Battlefield {
             break;
         }
         match state.waiting_for.clone() {
-            // The permission path is elected through the cast-variant menu, not
-            // by casting straight to the stack: `CastSpell` only opens the menu.
+            // The permission is elected through the cast-variant menu: `CastSpell`
+            // only opens the menu, it does not commit to a variant.
             WaitingFor::CastingVariantChoice { ref options, .. } => {
                 let index = options
                     .iter()
@@ -61125,12 +61131,10 @@ fn eighth_doctor_graveyard_cast_installs_the_leave_battlefield_exile_rider() {
     assert_eq!(
         state.objects[&card].zone,
         Zone::Battlefield,
-        "the card cast through the permission should resolve onto the battlefield"
+        "Ornithopter cast through the permission should resolve onto the battlefield"
     );
 
-    // The rider must be installed as a replacement on THAT object. Without the
-    // seam wiring this is empty and the assertion fails.
-    let installed_leave_battlefield = state.transient_continuous_effects.iter().any(|effect| {
+    let installed = state.transient_continuous_effects.iter().any(|effect| {
         matches!(
             &effect.affected,
             TargetFilter::SpecificObject { id } if *id == card
@@ -61143,7 +61147,13 @@ fn eighth_doctor_graveyard_cast_installs_the_leave_battlefield_exile_rider() {
         })
     });
     assert!(
-        installed_leave_battlefield,
-        "the granted rider must be installed on the permanent cast this way"
+        installed,
+        "the granted rider must be installed on the permanent cast this way; \
+         transient effects: {:?}",
+        state
+            .transient_continuous_effects
+            .iter()
+            .map(|e| (&e.affected, e.modifications.len()))
+            .collect::<Vec<_>>()
     );
 }

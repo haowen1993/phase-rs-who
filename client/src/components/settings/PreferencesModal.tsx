@@ -91,12 +91,18 @@ const LANGUAGE_OPTIONS: { value: SupportedLng; label: string }[] = [
   { value: "pt", label: "Português" },
   { value: "pl", label: "Polski" },
   { value: "ja", label: "日本語" },
+  // Simplified Chinese ships a UI catalog as well as card art, which is what
+  // makes `artLanguage: "auto"` able to reach Chinese art: the player chooses
+  // Chinese here and both follow. Without this entry the art picker could select
+  // Chinese while the interface had no way to, so `auto` would never resolve to it.
+  { value: "zhs", label: "简体中文" },
 ];
 
 /**
- * Card-art options. Wider than `LANGUAGE_OPTIONS` on purpose and sourced from
- * `ART_LANGUAGES` so the picker and the resolver can never drift: Simplified
- * Chinese (`zhs`) has art but no UI catalog, and Polish has a UI but no art.
+ * Card-art options, sourced from `ART_LANGUAGES` so the picker and the resolver
+ * can never drift. The two sets differ in BOTH directions: Polish has a UI and no
+ * localized art, and the derived locales can offer art the interface does not
+ * translate. `zhs` is in both today, which is what lets `"auto"` reach Chinese.
  *
  * Labels are autonyms and intentionally NOT translated, matching the language
  * picker above — a player hunting for their own language must be able to read

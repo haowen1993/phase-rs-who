@@ -1,7 +1,7 @@
 From 6f17856ae063b59e45da8fcbe1e014a1c2af1a45 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Sun, 4 Oct 2026 12:26:59 +0800
-Subject: [PATCH 1/9] feat(art): support Simplified Chinese card art
+Subject: [PATCH 01/10] feat(art): support Simplified Chinese card art
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

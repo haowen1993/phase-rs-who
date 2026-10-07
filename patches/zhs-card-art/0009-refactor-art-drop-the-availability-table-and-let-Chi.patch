@@ -1,7 +1,7 @@
 From c24f02382df04f72a75a9097e2284d1ceb844ed4 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 19:31:03 +0800
-Subject: [PATCH 9/9] refactor(art): drop the availability table and let
+Subject: [PATCH 09/10] refactor(art): drop the availability table and let
  Chinese art follow the interface language
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

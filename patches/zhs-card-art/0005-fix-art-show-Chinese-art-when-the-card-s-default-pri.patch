@@ -1,7 +1,7 @@
 From a3ad3f421de15b98b5ba171aafd1a3586c4a5b56 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 00:47:48 +0800
-Subject: [PATCH 5/9] fix(art): show Chinese art when the card's default
+Subject: [PATCH 05/10] fix(art): show Chinese art when the card's default
  printing lacks it
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

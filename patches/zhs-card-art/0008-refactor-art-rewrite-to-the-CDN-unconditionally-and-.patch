@@ -1,8 +1,8 @@
 From e89e20e18772821dd527ffddd03d98fe04ba3158 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 16:06:19 +0800
-Subject: [PATCH 8/9] refactor(art): rewrite to the CDN unconditionally and let
- its 404 pick the rung
+Subject: [PATCH 08/10] refactor(art): rewrite to the CDN unconditionally and
+ let its 404 pick the rung
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

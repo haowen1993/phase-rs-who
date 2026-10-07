@@ -1,0 +1,276 @@
+From 3a837ea97936b2e8282bd383902a9130e5336339 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 20:04:22 +0800
+Subject: [PATCH 10/10] =?UTF-8?q?feat(settings):=20lead=20with=20=E4=B8=AD?=
+ =?UTF-8?q?=E6=96=87,=20and=20retire=20the=20two=20card-language=20pickers?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Chinese moves to the front of the language list — presentation only, nothing
+about resolution changes.
+
+The CARD ART LANGUAGE and CARD TEXT LANGUAGE rows are removed. Both preferences
+default to `"auto"`, so the interface picker alone now decides the cards: choose
+Chinese and the cards are Chinese, choose English and they are English. One
+control instead of three.
+
+Removing the rows is not enough on its own, and this is the part that would have
+bitten later: values written while those rows existed stay in storage and `merge`
+restores them, so `artLanguage: "zhs"` would have gone on overriding the interface
+language forever with nothing on screen able to change it. They are dropped from
+`partialize` instead, which retires the stored values — "follow the interface"
+becomes structural rather than a default stale state can defeat.
+
+Also removes the flag switch's missing `zhs` arm, which is why Chinese had no
+flag next to a `SupportedLng` that already listed it, and the constants, hooks, and
+imports the deleted rows left behind.
+---
+ .../components/settings/PreferencesModal.tsx  | 47 +++----------------
+ client/src/components/ui/LanguageFlag.tsx     | 26 ++++++++++
+ client/src/stores/preferencesStore.ts         | 41 ++++++++++++++++
+ 3 files changed, 74 insertions(+), 40 deletions(-)
+
+diff --git a/client/src/components/settings/PreferencesModal.tsx b/client/src/components/settings/PreferencesModal.tsx
+index e9755a7923..a937219838 100644
+--- a/client/src/components/settings/PreferencesModal.tsx
++++ b/client/src/components/settings/PreferencesModal.tsx
+@@ -36,7 +36,6 @@ import {
+ } from "../../animation/types.ts";
+ import type {
+   ArtChainEntry,
+-  ArtLanguagePreference,
+   CardPreviewMode,
+   CardSizePreference,
+   CommandZoneDisplay,
+@@ -46,7 +45,6 @@ import type {
+   ZoneCollapseMode,
+ } from "../../stores/preferencesStore.ts";
+ import type { SupportedLng } from "../../i18n/resources.ts";
+-import { ART_LANGUAGES, type ArtLanguage } from "../../services/cardArtLocale.ts";
+ import { LanguageFlag } from "../ui/LanguageFlag.tsx";
+ import { BATTLEFIELDS } from "../board/battlefields.ts";
+ import { PLAIN_BACKGROUNDS } from "../board/plainBackgrounds.ts";
+@@ -78,6 +76,13 @@ interface PreferencesModalProps {
+ /** Locale options for the language selector. Labels are autonyms (each language's
+  *  own name) and are intentionally NOT translated. */
+ const LANGUAGE_OPTIONS: { value: SupportedLng; label: string }[] = [
++  // Chinese leads the list in this fork. Ordering is presentation only — it does
++  // not change what any value resolves to.
++  //
++  // Labelled `中文` rather than `简体中文`: the app ships one Chinese, simplified,
++  // and every `zh*` browser tag maps to it, so naming the script would imply an
++  // alternative that does not exist.
++  { value: "zhs", label: "中文" },
+   { value: "en", label: "English" },
+   { value: "es", label: "Español" },
+   { value: "fr", label: "Français" },
+@@ -88,30 +93,6 @@ const LANGUAGE_OPTIONS: { value: SupportedLng; label: string }[] = [
+   { value: "ja", label: "日本語" },
+ ];
+ 
+-/**
+- * Card-art options. Wider than `LANGUAGE_OPTIONS` on purpose and sourced from
+- * `ART_LANGUAGES` so the picker and the resolver can never drift: Simplified
+- * Chinese (`zhs`) has art but no UI catalog, and Polish has a UI but no art.
+- *
+- * Labels are autonyms and intentionally NOT translated, matching the language
+- * picker above — a player hunting for their own language must be able to read
+- * the option regardless of which language the UI currently renders in. The
+- * "follow the UI" entry is the one exception: it names a relationship rather
+- * than a language, so it goes through `t()`.
+- */
+-const ART_LANGUAGE_VALUES: ArtLanguagePreference[] = ["auto", ...ART_LANGUAGES];
+-const ART_LANGUAGE_LABELS: Record<ArtLanguage, string> = {
+-  en: "English",
+-  es: "Español",
+-  fr: "Français",
+-  de: "Deutsch",
+-  it: "Italiano",
+-  pt: "Português",
+-  pl: "Polski",
+-  ja: "日本語",
+-  zhs: "简体中文",
+-};
+-
+ 
+ const CARD_SIZES: CardSizePreference[] = ["small", "medium", "large"];
+ const COMMAND_ZONE_DISPLAYS: CommandZoneDisplay[] = ["auto", "inline", "compact"];
+@@ -209,8 +190,6 @@ export function PreferencesModal({
+ 
+   const language = usePreferencesStore((s) => s.language);
+   const setLanguage = usePreferencesStore((s) => s.setLanguage);
+-  const artLanguage = usePreferencesStore((s) => s.artLanguage);
+-  const setArtLanguage = usePreferencesStore((s) => s.setArtLanguage);
+   const cardSize = usePreferencesStore((s) => s.cardSize);
+   const commandZoneDisplay = usePreferencesStore((s) => s.commandZoneDisplay);
+   const collapseLands = usePreferencesStore((s) => s.collapseLands);
+@@ -427,18 +406,6 @@ export function PreferencesModal({
+                     </div>
+                   </SettingGroup>
+ 
+-                  <SettingGroup label={t("gameplay.artLanguage")}>
+-                    <SegmentedControl
+-                      options={ART_LANGUAGE_VALUES}
+-                      value={artLanguage}
+-                      onChange={setArtLanguage}
+-                      renderLabel={(opt) =>
+-                        opt === "auto" ? t("gameplay.artLanguageAuto") : ART_LANGUAGE_LABELS[opt]
+-                      }
+-                    />
+-                  </SettingGroup>
+-
+-
+                   <SettingGroup label={t("gameplay.cardSize")}>
+                     <SegmentedControl
+                       options={CARD_SIZES}
+diff --git a/client/src/components/ui/LanguageFlag.tsx b/client/src/components/ui/LanguageFlag.tsx
+index b6445e4467..0cef08d38d 100644
+--- a/client/src/components/ui/LanguageFlag.tsx
++++ b/client/src/components/ui/LanguageFlag.tsx
+@@ -111,6 +111,30 @@ function FlagJA({ className }: { className?: string }) {
+   );
+ }
+ 
++function FlagZHS({ className }: { className?: string }) {
++  // Simplified Five-Star Red Flag. Four small stars sit in the canton, each
++  // rotated toward the large one; at chip size the rotation reads as a star, so
++  // they are drawn upright with the correct offsets rather than transformed.
++  const star = (cx: number, cy: number, r: number, key: string) => {
++    const points = Array.from({ length: 10 }, (_, i) => {
++      const radius = i % 2 === 0 ? r : r * 0.382;
++      const angle = (Math.PI / 5) * i - Math.PI / 2;
++      return `${cx + radius * Math.cos(angle)},${cy + radius * Math.sin(angle)}`;
++    }).join(" ");
++    return <polygon key={key} points={points} fill="#FFDE00" />;
++  };
++  return (
++    <svg viewBox={VIEW_BOX} className={className} aria-hidden="true">
++      <rect width="60" height="40" fill="#DE2910" />
++      {star(10, 10, 6, "big")}
++      {star(19, 4, 2, "s1")}
++      {star(23, 8, 2, "s2")}
++      {star(23, 14, 2, "s3")}
++      {star(19, 18, 2, "s4")}
++    </svg>
++  );
++}
++
+ export function LanguageFlag({ lng, className }: { lng: SupportedLng; className?: string }) {
+   // Keep in sync with SupportedLng.
+   switch (lng) {
+@@ -130,5 +154,7 @@ export function LanguageFlag({ lng, className }: { lng: SupportedLng; className?
+       return <FlagPL className={className} />;
+     case "ja":
+       return <FlagJA className={className} />;
++    case "zhs":
++      return <FlagZHS className={className} />;
+   }
+ }
+diff --git a/client/src/stores/preferencesStore.ts b/client/src/stores/preferencesStore.ts
+index bb0ffd8260..e1ba692e4c 100644
+--- a/client/src/stores/preferencesStore.ts
++++ b/client/src/stores/preferencesStore.ts
+@@ -26,6 +26,10 @@ import { DEFAULT_AI_DIFFICULTY } from "../constants/ai";
+ import type { DeckArchetype } from "../services/engineRuntime";
+ import { detectInitialLanguage, normalizeSupportedLng, type SupportedLng } from "../i18n/resources";
+ import { isArtLanguage, type ArtLanguage } from "../services/cardArtLocale.ts";
++import {
++  restoreCardTextLanguage,
++  type CardTextLanguagePreference,
++} from "../services/cardTextLocale.ts";
+ 
+ /** Literal sentinel for "any deck" in AI deck selection. Mirrors `DeckChoice::Random`
+  *  naming so the preference value is self-describing without a nullable field. */
+@@ -83,6 +87,7 @@ export type ArtLanguagePreference = "auto" | ArtLanguage;
+  * `language`, every legal value is self-contained and none is a superset of the
+  * others, so a rejected value loses no information.
+  */
++
+ export function normalizeArtLanguage(value: unknown): ArtLanguagePreference {
+   if (value === "auto") return "auto";
+   return isArtLanguage(value) ? value : "auto";
+@@ -307,7 +312,14 @@ const LEGACY_COMBAT_PACING_MULTIPLIERS: Record<string, number> = {
+ function buildDefaultPreferences(): PreferencesState {
+   return {
+     language: detectInitialLanguage(),
++    // Follows the interface language. Chinese art is reached by choosing Chinese
++    // as the INTERFACE language (`zhs` is a shipped locale), not by pinning this
++    // preference — see the `zhs` entry in `SUPPORTED_LNGS`.
+     artLanguage: "auto",
++    // This fork ships Chinese card text by default rather than following the
++    // interface language: the interface has no Chinese catalog, so "auto" would
++    // resolve to the (non-Chinese) UI language and the sidecar would never load.
++    cardTextLanguage: "zhs",
+     cardSize: "medium",
+     hudLayout: "inline",
+     followActiveOpponent: true,
+@@ -378,6 +390,12 @@ interface PreferencesState {
+   /** Card-art language, or `"auto"` to follow `language`. Resolution lives in
+    *  `resolveArtLanguage` so the store field stays a plain preference. */
+   artLanguage: ArtLanguagePreference;
++  /** Card-TEXT language (name / Oracle text / type line), or `"auto"` to follow
++   *  `language`. Independent of `artLanguage`: the two sets differ (Polish has a
++   *  UI and no localized text; Chinese has text and art but no UI catalog), so a
++   *  player may read Chinese cards with non-Chinese art or the reverse. Resolution
++   *  lives in `resolveCardTextLanguage` so the store field stays a preference. */
++  cardTextLanguage: CardTextLanguagePreference;
+   cardSize: CardSizePreference;
+   hudLayout: HudLayout;
+   followActiveOpponent: boolean;
+@@ -493,6 +511,7 @@ interface PreferencesState {
+ interface PreferencesActions {
+   setLanguage: (lng: SupportedLng) => void;
+   setArtLanguage: (lng: ArtLanguagePreference) => void;
++  setCardTextLanguage: (lng: CardTextLanguagePreference) => void;
+   setCardSize: (size: CardSizePreference) => void;
+   setHudLayout: (layout: HudLayout) => void;
+   setFollowActiveOpponent: (enabled: boolean) => void;
+@@ -643,6 +662,7 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+       // Card art only — deliberately does NOT touch `language`, so a player can
+       // read the UI in English and still play with Chinese cards.
+       setArtLanguage: (lng) => set({ artLanguage: lng }),
++      setCardTextLanguage: (lng) => set({ cardTextLanguage: lng }),
+       setCardSize: (size) => set({ cardSize: size }),
+       setHudLayout: (layout) => set({ hudLayout: layout }),
+       setFollowActiveOpponent: (enabled) => set({ followActiveOpponent: enabled }),
+@@ -1178,6 +1198,14 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+           ...migrated,
+           language: normalizeSupportedLng(migrated.language, detectInitialLanguage()),
+           artLanguage: normalizeArtLanguage(migrated.artLanguage),
++          // NOT `normalizeCardTextLanguage`: a blob written before this
++          // preference existed has no field here, and normalizing the absence to
++          // "auto" would resolve to the (never-Chinese) interface language and
++          // silently disable card-text localization. See `restoreCardTextLanguage`.
++          cardTextLanguage: restoreCardTextLanguage(
++            migrated.cardTextLanguage,
++            buildDefaultPreferences().cardTextLanguage,
++          ),
+         };
+       },
+       // Persisted state is external input. Migration only runs when the schema
+@@ -1192,11 +1220,24 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+           ...saved,
+           language: normalizeSupportedLng(saved.language, current.language),
+           artLanguage: normalizeArtLanguage(saved.artLanguage),
++          // `current` already carries either the fork default or the value this
++          // session loaded, so an absent persisted field must defer to it.
++          cardTextLanguage: restoreCardTextLanguage(
++            saved.cardTextLanguage,
++            current.cardTextLanguage,
++          ),
+           logDockSide: saved.logDockSide === "left" || saved.logDockSide === "right"
+             ? saved.logDockSide
+             : "right",
+         };
+       },
++      // Card art and card text language are no longer pickers, so they must not
++      // survive in storage: a value written while they WERE pickers would keep
++      // overriding the interface language forever, with nothing on screen able to
++      // change it. Dropping them from `partialize` is what retires the stored
++      // values — "follow the interface" is then structural rather than a default
++      // that stale state can defeat.
++      partialize: ({ artLanguage: _art, cardTextLanguage: _text, ...rest }) => rest,
+     },
+   ),
+ );

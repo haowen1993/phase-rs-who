@@ -39,7 +39,7 @@ the localized prefix would spend a guaranteed 404 on every hover preview.
  1 file changed, 34 insertions(+), 177 deletions(-)
 
 diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
-index ca3d1f3054..0d7619e748 100644
+index ca3d1f305..0d7619e74 100644
 --- a/client/src/services/scryfall.ts
 +++ b/client/src/services/scryfall.ts
 @@ -381,10 +381,6 @@ export function isLocaleArtReady(lang: string): boolean {

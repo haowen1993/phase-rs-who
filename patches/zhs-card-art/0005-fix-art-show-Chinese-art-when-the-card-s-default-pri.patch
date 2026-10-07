@@ -36,7 +36,7 @@ Verified end to end: both cards now resolve to their WHO printing and serve
  4 files changed, 112 insertions(+)
 
 diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
-index c2651d0ca7..7a2a38b889 100644
+index c2651d0ca..7a2a38b88 100644
 --- a/client/src/services/scryfall.ts
 +++ b/client/src/services/scryfall.ts
 @@ -388,6 +388,12 @@ export function loadLocaleArt(lang: string): Promise<Map<string, LocalizedArtEnt
@@ -161,7 +161,7 @@ index c2651d0ca7..7a2a38b889 100644
  
    await loadPrintingsData();
 diff --git a/client/src/vite-env.d.ts b/client/src/vite-env.d.ts
-index cc7d856890..8bef21faad 100644
+index cc7d85689..8bef21faa 100644
 --- a/client/src/vite-env.d.ts
 +++ b/client/src/vite-env.d.ts
 @@ -34,6 +34,7 @@ interface Window {
@@ -173,7 +173,7 @@ index cc7d856890..8bef21faad 100644
  declare const __CHANGELOG_URL__: string;
  declare const __CHANGELOG_META_URL__: string;
 diff --git a/client/vite.config.ts b/client/vite.config.ts
-index 37a05befde..1684f1fedd 100644
+index 37a05befd..1684f1fed 100644
 --- a/client/vite.config.ts
 +++ b/client/vite.config.ts
 @@ -212,6 +212,16 @@ function dataFileDefines(mode: string, buildHash: string): Record<string, string
@@ -194,7 +194,7 @@ index 37a05befde..1684f1fedd 100644
    for (const filename of manifest) {
      // "card-names.json" → "__CARD_NAMES_URL__"; "card-data.de.json" →
 diff --git a/client/vitest.config.ts b/client/vitest.config.ts
-index f75cf0c4b1..184c1a7cff 100644
+index f75cf0c4b..184c1a7cf 100644
 --- a/client/vitest.config.ts
 +++ b/client/vitest.config.ts
 @@ -79,6 +79,7 @@ export default defineConfig({

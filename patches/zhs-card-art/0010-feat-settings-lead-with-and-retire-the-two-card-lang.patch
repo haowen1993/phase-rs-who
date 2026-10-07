@@ -32,7 +32,7 @@ imports the deleted rows left behind.
  3 files changed, 74 insertions(+), 40 deletions(-)
 
 diff --git a/client/src/components/settings/PreferencesModal.tsx b/client/src/components/settings/PreferencesModal.tsx
-index e9755a7923..a937219838 100644
+index e9755a792..a93721983 100644
 --- a/client/src/components/settings/PreferencesModal.tsx
 +++ b/client/src/components/settings/PreferencesModal.tsx
 @@ -36,7 +36,6 @@ import {
@@ -125,7 +125,7 @@ index e9755a7923..a937219838 100644
                      <SegmentedControl
                        options={CARD_SIZES}
 diff --git a/client/src/components/ui/LanguageFlag.tsx b/client/src/components/ui/LanguageFlag.tsx
-index b6445e4467..0cef08d38d 100644
+index b6445e446..0cef08d38 100644
 --- a/client/src/components/ui/LanguageFlag.tsx
 +++ b/client/src/components/ui/LanguageFlag.tsx
 @@ -111,6 +111,30 @@ function FlagJA({ className }: { className?: string }) {
@@ -168,7 +168,7 @@ index b6445e4467..0cef08d38d 100644
    }
  }
 diff --git a/client/src/stores/preferencesStore.ts b/client/src/stores/preferencesStore.ts
-index bb0ffd8260..e1ba692e4c 100644
+index bb0ffd826..e1ba692e4 100644
 --- a/client/src/stores/preferencesStore.ts
 +++ b/client/src/stores/preferencesStore.ts
 @@ -26,6 +26,10 @@ import { DEFAULT_AI_DIFFICULTY } from "../constants/ai";

@@ -26,7 +26,7 @@ resolve [zhs (404) -> sf (200)] instead of stopping at the Chinese 404.
  2 files changed, 28 insertions(+), 6 deletions(-)
 
 diff --git a/client/src/hooks/useCardImage.ts b/client/src/hooks/useCardImage.ts
-index 07c6ec13b5..091b3e6d25 100644
+index 07c6ec13b..091b3e6d2 100644
 --- a/client/src/hooks/useCardImage.ts
 +++ b/client/src/hooks/useCardImage.ts
 @@ -232,10 +232,11 @@ function remoteAsset(
@@ -52,7 +52,7 @@ index 07c6ec13b5..091b3e6d25 100644
            publish(fallback);
          } finally {
 diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
-index b1872cd6fc..c2651d0ca7 100644
+index b1872cd6f..c2651d0ca 100644
 --- a/client/src/services/scryfall.ts
 +++ b/client/src/services/scryfall.ts
 @@ -577,6 +577,13 @@ export const IMAGE_SIZE_WIDTHS: Record<"small" | "normal", number> = {

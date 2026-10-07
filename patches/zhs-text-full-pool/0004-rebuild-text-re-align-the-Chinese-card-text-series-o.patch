@@ -1,0 +1,318 @@
+From 325560ec3b78a162d3b010599395c751775f4510 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 21:08:40 +0800
+Subject: [PATCH 4/4] rebuild(text): re-align the Chinese card-text series onto
+ the current card-art series
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The series could not be applied at all: its patches were generated from a branch
+built on an EARLIER card-art series, and they patch `preferencesStore.ts` — the file
+both series share. Two things had moved underneath them:
+
+  * `restoreArtLanguage` was deleted, so the patches' context no longer anchored.
+  * `artLanguage` went from a forced `"zhs"` back to `"auto"`, which is the line
+    their hunks were positioned against.
+
+Replaying the old commits does not work either: the earliest of them predates the
+`restoreCardTextLanguage` fix, so cherry-picking it reintroduces a version that
+resolves an absent persisted value to `"auto"` — the exact defect that fix exists
+to prevent. The final state is taken directly instead.
+
+The shared files are resolved in favour of the current art series, and only the
+card-text additions are carried: `cardTextLocale.ts` and the `cardTextLanguage`
+preference in `preferencesStore`, the card-text strings in the `settings.json`
+catalogs (both `cardTextLanguage*` and the `artLanguage*` keys the art series
+contributes), and the parity test's `zhs` entry.
+
+Only three commits of the old history are kept — the sidecar generator, the rulings
+translation, and its quality floor — because those are the parts that were already
+independent of the shared files.
+---
+ client/src/hooks/useEngineCardData.ts     | 17 ++++-
+ client/src/i18n/locales/de/settings.json  |  4 +-
+ client/src/i18n/locales/en/settings.json  |  4 +-
+ client/src/i18n/locales/es/settings.json  |  4 +-
+ client/src/i18n/locales/fr/settings.json  |  4 +-
+ client/src/i18n/locales/it/settings.json  |  4 +-
+ client/src/i18n/locales/ja/settings.json  |  4 +-
+ client/src/i18n/locales/pl/settings.json  |  4 +-
+ client/src/i18n/locales/pt/settings.json  |  4 +-
+ client/src/i18n/locales/zhs/settings.json |  2 +
+ client/src/services/cardTextLocale.ts     | 91 +++++++++++++++++++++++
+ 11 files changed, 132 insertions(+), 10 deletions(-)
+ create mode 100644 client/src/services/cardTextLocale.ts
+
+diff --git a/client/src/hooks/useEngineCardData.ts b/client/src/hooks/useEngineCardData.ts
+index a818b807e..e601e0513 100644
+--- a/client/src/hooks/useEngineCardData.ts
++++ b/client/src/hooks/useEngineCardData.ts
+@@ -7,6 +7,7 @@ import {
+ } from "../services/engineRuntime";
+ import { getSharedAdapter } from "../adapter/wasm-adapter";
+ import { usePreferencesStore } from "../stores/preferencesStore";
++import { resolveCardTextLanguage } from "../services/cardTextLocale";
+ 
+ /**
+  * Engine-parsed card face data returned from WASM.
+@@ -51,7 +52,13 @@ export interface ParsedItem {
+  * wrapper ensures that as a prerequisite, then performs the query.
+  */
+ export function useEngineCardData(cardName: string | null): EngineCardFace | null {
+-  const language = usePreferencesStore((s) => s.language);
++  // Card TEXT follows its own preference, not the interface language: the
++  // interface has no Chinese catalog, so keying card text off `language`
++  // would make a Chinese sidecar unreachable. Falls back to the interface
++  // language when the preference is "auto".
++  const language = usePreferencesStore((s) =>
++    resolveCardTextLanguage(s.language, s.cardTextLanguage),
++  );
+   const [data, setData] = useState<EngineCardFace | null>(null);
+ 
+   useEffect(() => {
+@@ -102,7 +109,13 @@ export function useEngineCardData(cardName: string | null): EngineCardFace | nul
+  * card name — the engine's identity key, which stays English everywhere.
+  */
+ export function useLocalizedCardName(name: string | null): string | null {
+-  const language = usePreferencesStore((s) => s.language);
++  // Card TEXT follows its own preference, not the interface language: the
++  // interface has no Chinese catalog, so keying card text off `language`
++  // would make a Chinese sidecar unreachable. Falls back to the interface
++  // language when the preference is "auto".
++  const language = usePreferencesStore((s) =>
++    resolveCardTextLanguage(s.language, s.cardTextLanguage),
++  );
+   const [localized, setLocalized] = useState<string | null>(name);
+ 
+   useEffect(() => {
+diff --git a/client/src/i18n/locales/de/settings.json b/client/src/i18n/locales/de/settings.json
+index 4f6ef27bf..dae5605fe 100644
+--- a/client/src/i18n/locales/de/settings.json
++++ b/client/src/i18n/locales/de/settings.json
+@@ -73,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Links",
+       "right": "Rechts"
+-    }
++    },
++    "cardTextLanguage": "Sprache des Kartentexts",
++    "cardTextLanguageAuto": "Oberfläche folgen"
+   },
+   "visual": {
+     "title": "Grafik",
+diff --git a/client/src/i18n/locales/en/settings.json b/client/src/i18n/locales/en/settings.json
+index d0437d92f..856541b95 100644
+--- a/client/src/i18n/locales/en/settings.json
++++ b/client/src/i18n/locales/en/settings.json
+@@ -73,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Left",
+       "right": "Right"
+-    }
++    },
++    "cardTextLanguage": "Card text language",
++    "cardTextLanguageAuto": "Follow interface"
+   },
+   "visual": {
+     "title": "Visual",
+diff --git a/client/src/i18n/locales/es/settings.json b/client/src/i18n/locales/es/settings.json
+index 4168d90fa..3e633699f 100644
+--- a/client/src/i18n/locales/es/settings.json
++++ b/client/src/i18n/locales/es/settings.json
+@@ -73,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Izquierda",
+       "right": "Derecha"
+-    }
++    },
++    "cardTextLanguage": "Idioma del texto de las cartas",
++    "cardTextLanguageAuto": "Seguir la interfaz"
+   },
+   "visual": {
+     "title": "Visual",
+diff --git a/client/src/i18n/locales/fr/settings.json b/client/src/i18n/locales/fr/settings.json
+index fa65dfde1..c7baf51c0 100644
+--- a/client/src/i18n/locales/fr/settings.json
++++ b/client/src/i18n/locales/fr/settings.json
+@@ -73,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Gauche",
+       "right": "Droite"
+-    }
++    },
++    "cardTextLanguage": "Langue du texte des cartes",
++    "cardTextLanguageAuto": "Suivre l'interface"
+   },
+   "visual": {
+     "title": "Visuel",
+diff --git a/client/src/i18n/locales/it/settings.json b/client/src/i18n/locales/it/settings.json
+index 7db6ad4cc..f368b4cf3 100644
+--- a/client/src/i18n/locales/it/settings.json
++++ b/client/src/i18n/locales/it/settings.json
+@@ -73,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Sinistra",
+       "right": "Destra"
+-    }
++    },
++    "cardTextLanguage": "Lingua del testo delle carte",
++    "cardTextLanguageAuto": "Segui l'interfaccia"
+   },
+   "visual": {
+     "title": "Grafica",
+diff --git a/client/src/i18n/locales/ja/settings.json b/client/src/i18n/locales/ja/settings.json
+index 0660182fc..5bfe69126 100644
+--- a/client/src/i18n/locales/ja/settings.json
++++ b/client/src/i18n/locales/ja/settings.json
+@@ -73,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "左",
+       "right": "右"
+-    }
++    },
++    "cardTextLanguage": "カードテキストの言語",
++    "cardTextLanguageAuto": "インターフェースに合わせる"
+   },
+   "visual": {
+     "title": "表示",
+diff --git a/client/src/i18n/locales/pl/settings.json b/client/src/i18n/locales/pl/settings.json
+index 21f06d694..f868dbcd5 100644
+--- a/client/src/i18n/locales/pl/settings.json
++++ b/client/src/i18n/locales/pl/settings.json
+@@ -73,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Lewo",
+       "right": "Prawo"
+-    }
++    },
++    "cardTextLanguage": "Język tekstu kart",
++    "cardTextLanguageAuto": "Zgodnie z interfejsem"
+   },
+   "visual": {
+     "title": "Grafika",
+diff --git a/client/src/i18n/locales/pt/settings.json b/client/src/i18n/locales/pt/settings.json
+index daa7761f9..34a5caa7b 100644
+--- a/client/src/i18n/locales/pt/settings.json
++++ b/client/src/i18n/locales/pt/settings.json
+@@ -73,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Esquerda",
+       "right": "Direita"
+-    }
++    },
++    "cardTextLanguage": "Idioma do texto das cartas",
++    "cardTextLanguageAuto": "Seguir a interface"
+   },
+   "visual": {
+     "title": "Visual",
+diff --git a/client/src/i18n/locales/zhs/settings.json b/client/src/i18n/locales/zhs/settings.json
+index d0437d92f..4e8116a96 100644
+--- a/client/src/i18n/locales/zhs/settings.json
++++ b/client/src/i18n/locales/zhs/settings.json
+@@ -31,6 +31,8 @@
+     "language": "Language",
+     "artLanguage": "Card art language",
+     "artLanguageAuto": "Follow interface",
++    "cardTextLanguage": "卡牌文本语言",
++    "cardTextLanguageAuto": "跟随界面",
+     "cardSize": "Card Size",
+     "commandZone": "Command Zone",
+     "autoPass": "Auto-Pass",
+diff --git a/client/src/services/cardTextLocale.ts b/client/src/services/cardTextLocale.ts
+new file mode 100644
+index 000000000..945e8e072
+--- /dev/null
++++ b/client/src/services/cardTextLocale.ts
+@@ -0,0 +1,91 @@
++/**
++ * Card-TEXT locale vocabulary: which languages a card's name / Oracle text /
++ * type line can be displayed in, and how a stored preference resolves to one.
++ *
++ * A THIRD axis, independent of both the interface language (`SUPPORTED_LNGS`) and
++ * the card-art language (`ART_LANGUAGES`). The three sets are not nested in any
++ * direction, and card TEXT is the one that needs its own switch:
++ *
++ *   - `zhs` has text (from the 大学院废墟 dataset, via
++ *     `scripts/gen-zhs-card-text.mjs`) and art, but NO UI catalog. A player who
++ *     wants to read Chinese cards is not thereby asking for a Chinese interface —
++ *     and until a chrome translation exists, coupling the two would mean either
++ *     no Chinese cards or a broken UI.
++ *   - `pl` has a UI catalog and no localized card text at all (MTGJSON carries
++ *     zero Polish `foreignData`), so it cannot appear here.
++ *
++ * The loaders tolerate every value: `ensureCardLocale` (engineRuntime.ts)
++ * resolves a missing sidecar to an empty map and callers fall back to English
++ * PER FIELD. So an unrecognized or unpublished locale degrades to English text
++ * rather than breaking a card.
++ */
++
++/** Locales the app ships a card-content sidecar for (`card-data.<lng>.json`).
++ *  `en` is listed because it is a selectable answer, not because a sidecar
++ *  exists — English is the card data itself, so `ensureCardLocale("en")` is a
++ *  deliberate no-op. */
++export const CARD_TEXT_LANGUAGES = [
++  "en",
++  "es",
++  "fr",
++  "de",
++  "it",
++  "pt",
++  "ja",
++  "zhs",
++] as const;
++export type CardTextLanguage = (typeof CARD_TEXT_LANGUAGES)[number];
++
++export function isCardTextLanguage(value: unknown): value is CardTextLanguage {
++  return typeof value === "string" && (CARD_TEXT_LANGUAGES as readonly string[]).includes(value);
++}
++
++/** Card-text language, or `"auto"` to follow the interface language. */
++export type CardTextLanguagePreference = "auto" | CardTextLanguage;
++
++/**
++ * Reduce an untrusted (persisted or user-supplied) value to a legal card-text
++ * preference. Anything unrecognized becomes `"auto"` — the behaviour the app had
++ * before this preference existed — so a stale or hand-edited blob can never
++ * select a locale no sidecar can satisfy.
++ */
++export function normalizeCardTextLanguage(value: unknown): CardTextLanguagePreference {
++  if (value === "auto") return "auto";
++  return isCardTextLanguage(value) ? value : "auto";
++}
++
++/**
++ * `normalizeCardTextLanguage` for a value read out of PERSISTED state, where
++ * `undefined` means "this blob predates the preference" rather than "invalid".
++ *
++ * The distinction is load-bearing here because `"auto"` resolves to the INTERFACE
++ * language, and the interface has no Chinese catalog (`SUPPORTED_LNGS` contains no
++ * `zhs`). So an absent field normalized to `"auto"` can never reach the Chinese
++ * sidecar: every install that saved preferences before this preference existed
++ * would silently lose card-text localization — which is this fork's whole point.
++ * Falling back to `current` keeps the fork's default for an upgrade and an
++ * explicit choice for anyone who already made one.
++ */
++export function restoreCardTextLanguage(
++  value: unknown,
++  current: CardTextLanguagePreference,
++): CardTextLanguagePreference {
++  return value === undefined ? current : normalizeCardTextLanguage(value);
++}
++
++/**
++ * The card-text locale to resolve in, given the interface language and the
++ * preference (`"auto"` = follow the interface).
++ *
++ * Total and never-throwing, mirroring `resolveArtLanguage`: an unrecognized
++ * preference falls back to the interface language rather than producing a locale
++ * the sidecar loader cannot satisfy, which is what makes it safe to call on a
++ * value that came out of localStorage.
++ */
++export function resolveCardTextLanguage(
++  language: string,
++  cardTextLanguage: string | undefined,
++): string {
++  if (cardTextLanguage === "auto" || cardTextLanguage === undefined) return language;
++  return isCardTextLanguage(cardTextLanguage) ? cardTextLanguage : language;
++}

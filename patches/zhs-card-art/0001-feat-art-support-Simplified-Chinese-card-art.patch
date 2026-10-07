@@ -74,7 +74,7 @@ and after, all pre-existing).
  create mode 100644 client/src/services/cardArtLocale.ts
 
 diff --git a/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx b/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx
-index 4add61a6de..aefd7136c2 100644
+index 4add61a6d..aefd7136c 100644
 --- a/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx
 +++ b/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx
 @@ -76,6 +76,10 @@ vi.mock("../../../services/scryfall.ts", () => ({
@@ -89,7 +89,7 @@ index 4add61a6de..aefd7136c2 100644
    resolveOracleIdSync: vi.fn(() => null),
    resolvePrintingImageUrl: vi.fn(),
 diff --git a/client/src/components/settings/PreferencesModal.tsx b/client/src/components/settings/PreferencesModal.tsx
-index 948ba65460..a0972e426d 100644
+index 948ba6546..a0972e426 100644
 --- a/client/src/components/settings/PreferencesModal.tsx
 +++ b/client/src/components/settings/PreferencesModal.tsx
 @@ -36,6 +36,7 @@ import {
@@ -167,7 +167,7 @@ index 948ba65460..a0972e426d 100644
                      <SegmentedControl
                        options={CARD_SIZES}
 diff --git a/client/src/hooks/__tests__/useCardImage.test.tsx b/client/src/hooks/__tests__/useCardImage.test.tsx
-index 7bb74c8905..a5710c87b4 100644
+index 7bb74c890..a5710c87b 100644
 --- a/client/src/hooks/__tests__/useCardImage.test.tsx
 +++ b/client/src/hooks/__tests__/useCardImage.test.tsx
 @@ -33,7 +33,10 @@ function mockNoRemoteScryfall(resolveFaceIndexSync: (...args: unknown[]) => numb
@@ -333,7 +333,7 @@ index 7bb74c8905..a5710c87b4 100644
        resolveOracleIdSync: vi.fn().mockReturnValue(null),
        resolvePrintingImageUrl: vi.fn(),
 diff --git a/client/src/hooks/useCardImage.ts b/client/src/hooks/useCardImage.ts
-index 789396e100..a2e51faa81 100644
+index 789396e10..a2e51faa8 100644
 --- a/client/src/hooks/useCardImage.ts
 +++ b/client/src/hooks/useCardImage.ts
 @@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -567,7 +567,7 @@ index 789396e100..a2e51faa81 100644
      explicitPrintingId,
      effectiveOffline,
 diff --git a/client/src/i18n/locales/de/settings.json b/client/src/i18n/locales/de/settings.json
-index 17ea7c9be2..4f6ef27bf5 100644
+index 17ea7c9be..4f6ef27bf 100644
 --- a/client/src/i18n/locales/de/settings.json
 +++ b/client/src/i18n/locales/de/settings.json
 @@ -29,6 +29,8 @@
@@ -580,7 +580,7 @@ index 17ea7c9be2..4f6ef27bf5 100644
      "commandZone": "Kommandozone",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/en/settings.json b/client/src/i18n/locales/en/settings.json
-index 986ea130db..d0437d92f3 100644
+index 986ea130d..d0437d92f 100644
 --- a/client/src/i18n/locales/en/settings.json
 +++ b/client/src/i18n/locales/en/settings.json
 @@ -29,6 +29,8 @@
@@ -593,7 +593,7 @@ index 986ea130db..d0437d92f3 100644
      "commandZone": "Command Zone",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/es/settings.json b/client/src/i18n/locales/es/settings.json
-index aa1c3530ad..4168d90fa2 100644
+index aa1c3530a..4168d90fa 100644
 --- a/client/src/i18n/locales/es/settings.json
 +++ b/client/src/i18n/locales/es/settings.json
 @@ -29,6 +29,8 @@
@@ -606,7 +606,7 @@ index aa1c3530ad..4168d90fa2 100644
      "commandZone": "Zona de mando",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/fr/settings.json b/client/src/i18n/locales/fr/settings.json
-index 268dc1458b..fa65dfde1b 100644
+index 268dc1458..fa65dfde1 100644
 --- a/client/src/i18n/locales/fr/settings.json
 +++ b/client/src/i18n/locales/fr/settings.json
 @@ -29,6 +29,8 @@
@@ -619,7 +619,7 @@ index 268dc1458b..fa65dfde1b 100644
      "commandZone": "Zone de commandement",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/it/settings.json b/client/src/i18n/locales/it/settings.json
-index 5670b3c274..7db6ad4cc9 100644
+index 5670b3c27..7db6ad4cc 100644
 --- a/client/src/i18n/locales/it/settings.json
 +++ b/client/src/i18n/locales/it/settings.json
 @@ -29,6 +29,8 @@
@@ -632,7 +632,7 @@ index 5670b3c274..7db6ad4cc9 100644
      "commandZone": "Zona di comando",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/ja/settings.json b/client/src/i18n/locales/ja/settings.json
-index 595e88ad88..0660182fc0 100644
+index 595e88ad8..0660182fc 100644
 --- a/client/src/i18n/locales/ja/settings.json
 +++ b/client/src/i18n/locales/ja/settings.json
 @@ -29,6 +29,8 @@
@@ -645,7 +645,7 @@ index 595e88ad88..0660182fc0 100644
      "commandZone": "統率領域",
      "autoPass": "自動パス",
 diff --git a/client/src/i18n/locales/pl/settings.json b/client/src/i18n/locales/pl/settings.json
-index a61dad8ffd..21f06d6946 100644
+index a61dad8ff..21f06d694 100644
 --- a/client/src/i18n/locales/pl/settings.json
 +++ b/client/src/i18n/locales/pl/settings.json
 @@ -29,6 +29,8 @@
@@ -658,7 +658,7 @@ index a61dad8ffd..21f06d6946 100644
      "commandZone": "Strefa dowodzenia",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/pt/settings.json b/client/src/i18n/locales/pt/settings.json
-index e0b472d21a..daa7761f94 100644
+index e0b472d21..daa7761f9 100644
 --- a/client/src/i18n/locales/pt/settings.json
 +++ b/client/src/i18n/locales/pt/settings.json
 @@ -29,6 +29,8 @@
@@ -671,7 +671,7 @@ index e0b472d21a..daa7761f94 100644
      "commandZone": "Zona de comando",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/services/__tests__/scryfall.test.ts b/client/src/services/__tests__/scryfall.test.ts
-index cce6505f56..0367218edd 100644
+index cce6505f5..0367218ed 100644
 --- a/client/src/services/__tests__/scryfall.test.ts
 +++ b/client/src/services/__tests__/scryfall.test.ts
 @@ -12,6 +12,9 @@ import { tmpdir } from "node:os";
@@ -957,7 +957,7 @@ index cce6505f56..0367218edd 100644
 +});
 diff --git a/client/src/services/cardArtLocale.ts b/client/src/services/cardArtLocale.ts
 new file mode 100644
-index 0000000000..0f801f10f1
+index 000000000..0f801f10f
 --- /dev/null
 +++ b/client/src/services/cardArtLocale.ts
 @@ -0,0 +1,54 @@
@@ -1016,7 +1016,7 @@ index 0000000000..0f801f10f1
 +  return isArtLanguage(artLanguage) ? artLanguage : language;
 +}
 diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
-index 2e980b53ff..94053a54f5 100644
+index 2e980b53f..94053a54f 100644
 --- a/client/src/services/scryfall.ts
 +++ b/client/src/services/scryfall.ts
 @@ -1,5 +1,6 @@
@@ -1256,7 +1256,7 @@ index 2e980b53ff..94053a54f5 100644
    return layout === "split";
  }
 diff --git a/client/src/services/visualPacks/__tests__/candidateKeys.test.ts b/client/src/services/visualPacks/__tests__/candidateKeys.test.ts
-index 019d2cae91..2657d61e98 100644
+index 019d2cae9..2657d61e9 100644
 --- a/client/src/services/visualPacks/__tests__/candidateKeys.test.ts
 +++ b/client/src/services/visualPacks/__tests__/candidateKeys.test.ts
 @@ -88,3 +88,44 @@ describe("semanticCardCandidateGroups", () => {
@@ -1305,7 +1305,7 @@ index 019d2cae91..2657d61e98 100644
 +  });
 +});
 diff --git a/client/src/services/visualPacks/types.ts b/client/src/services/visualPacks/types.ts
-index 512e69d0b1..db1881dbb0 100644
+index 512e69d0b..db1881dbb 100644
 --- a/client/src/services/visualPacks/types.ts
 +++ b/client/src/services/visualPacks/types.ts
 @@ -17,12 +17,17 @@ export type OperationId = Brand<string, "OperationId">;
@@ -1329,7 +1329,7 @@ index 512e69d0b1..db1881dbb0 100644
  function branded<T extends string>(value: string, pattern: RegExp, name: string): T {
    if (!pattern.test(value)) throw new Error(`invalid ${name}`);
 diff --git a/client/src/stores/preferencesStore.ts b/client/src/stores/preferencesStore.ts
-index e6634f1013..bb0ffd8260 100644
+index e6634f101..bb0ffd826 100644
 --- a/client/src/stores/preferencesStore.ts
 +++ b/client/src/stores/preferencesStore.ts
 @@ -25,6 +25,7 @@ import type { AIDifficulty } from "../constants/ai";

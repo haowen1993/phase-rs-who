@@ -36,7 +36,7 @@ above are the reported cases (live Scryfall image, no Simplified-Chinese one).
  3 files changed, 100 insertions(+), 20 deletions(-)
 
 diff --git a/client/src/hooks/useCardImage.ts b/client/src/hooks/useCardImage.ts
-index a2e51faa81..07c6ec13b5 100644
+index a2e51faa8..07c6ec13b 100644
 --- a/client/src/hooks/useCardImage.ts
 +++ b/client/src/hooks/useCardImage.ts
 @@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -117,7 +117,7 @@ index a2e51faa81..07c6ec13b5 100644
      };
  
 diff --git a/client/src/services/__tests__/scryfall.test.ts b/client/src/services/__tests__/scryfall.test.ts
-index 57762065b3..d5a577289f 100644
+index 57762065b..d5a577289 100644
 --- a/client/src/services/__tests__/scryfall.test.ts
 +++ b/client/src/services/__tests__/scryfall.test.ts
 @@ -2223,6 +2223,83 @@ describe("derived card art locales", () => {
@@ -205,7 +205,7 @@ index 57762065b3..d5a577289f 100644
    const remote = (src: string) => ({ kind: "remote" as const, src });
    const terminal = { kind: "fallback" as const, src: null };
 diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
-index 94053a54f5..b1872cd6fc 100644
+index 94053a54f..b1872cd6f 100644
 --- a/client/src/services/scryfall.ts
 +++ b/client/src/services/scryfall.ts
 @@ -1201,12 +1201,29 @@ function resolveImageAsset(

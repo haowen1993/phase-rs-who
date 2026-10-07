@@ -28,7 +28,7 @@ the asset it replaced.
  3 files changed, 96 insertions(+), 2 deletions(-)
 
 diff --git a/client/src/hooks/useCardImage.ts b/client/src/hooks/useCardImage.ts
-index 091b3e6d25..74f967c2bb 100644
+index 091b3e6d2..74f967c2b 100644
 --- a/client/src/hooks/useCardImage.ts
 +++ b/client/src/hooks/useCardImage.ts
 @@ -769,10 +769,17 @@ async function acquireCachedImageSrc(
@@ -58,7 +58,7 @@ index 091b3e6d25..74f967c2bb 100644
      } else if (oracleId) {
        asset = await fetchCardImageAssetByOracleId(oracleId, faceName, size);
 diff --git a/client/src/services/__tests__/scryfall.test.ts b/client/src/services/__tests__/scryfall.test.ts
-index d5a577289f..ebe5958598 100644
+index d5a577289..ebe595859 100644
 --- a/client/src/services/__tests__/scryfall.test.ts
 +++ b/client/src/services/__tests__/scryfall.test.ts
 @@ -2300,6 +2300,69 @@ describe("derived locale fallback on the asset funnel", () => {
@@ -132,7 +132,7 @@ index d5a577289f..ebe5958598 100644
    const remote = (src: string) => ({ kind: "remote" as const, src });
    const terminal = { kind: "fallback" as const, src: null };
 diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
-index 7a2a38b889..33582bb9bf 100644
+index 7a2a38b88..33582bb9b 100644
 --- a/client/src/services/scryfall.ts
 +++ b/client/src/services/scryfall.ts
 @@ -1520,6 +1520,15 @@ export async function fetchTokenImageUrl(

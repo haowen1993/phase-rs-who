@@ -34,7 +34,7 @@ no art in this locale and keep English art everywhere.
  1 file changed, 75 insertions(+), 21 deletions(-)
 
 diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
-index 33582bb9bf..ca3d1f3054 100644
+index 33582bb9b..ca3d1f305 100644
 --- a/client/src/services/scryfall.ts
 +++ b/client/src/services/scryfall.ts
 @@ -381,6 +381,10 @@ export function isLocaleArtReady(lang: string): boolean {

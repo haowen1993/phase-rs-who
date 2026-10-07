@@ -1,7 +1,7 @@
-From b723fd9e16fc8c55f9b37adf49298e0932345518 Mon Sep 17 00:00:00 2001
+From b5bd0e95673a6b549b0c289d10f149f9038c9635 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 11:31:28 +0800
-Subject: [PATCH 1/8] =?UTF-8?q?feat(scripts):=20generate=20the=20Simplifie?=
+Subject: [PATCH 1/4] =?UTF-8?q?feat(scripts):=20generate=20the=20Simplifie?=
  =?UTF-8?q?d-Chinese=20card-text=20sidecar=20from=20=E5=A4=A7=E5=AD=A6?=
  =?UTF-8?q?=E9=99=A2=E5=BA=9F=E5=A2=9F?=
 MIME-Version: 1.0
@@ -38,28 +38,13 @@ number, never by file order.
 Measured on the current 362-card pool: 358/358 usable keys covered (100%).
 Text is CC-BY-SA-4.0 and attributed in the script's output.
 ---
- .gitignore                    |   6 +
  scripts/gen-zhs-card-text.mjs | 258 ++++++++++++++++++++++++++++++++++
- 2 files changed, 264 insertions(+)
+ 1 file changed, 258 insertions(+)
  create mode 100644 scripts/gen-zhs-card-text.mjs
 
-diff --git a/.gitignore b/.gitignore
-index 766ed40185..392b4ee41a 100644
---- a/.gitignore
-+++ b/.gitignore
-@@ -144,3 +144,9 @@ triage/dashboard.md
- # Changelog backfill drafts — review staging only, never committed. The
- # canonical changelog lives at client/public/changelog.json.
- scripts/changelog/backfill-drafts.json
-+
-+# 大学院废墟 (magic-cards-zhs) weekly export cache — the ~74 MB tarball and its
-+# extraction, downloaded on demand by scripts/gen-zhs-card-text.mjs. The derived
-+# sidecar it produces (`client/public/card-data.zhs.json`) is already covered by
-+# the `client/public/card-data.*.json` rule above.
-+.zhs-cache/
 diff --git a/scripts/gen-zhs-card-text.mjs b/scripts/gen-zhs-card-text.mjs
 new file mode 100644
-index 0000000000..b37b29a63a
+index 000000000..b37b29a63
 --- /dev/null
 +++ b/scripts/gen-zhs-card-text.mjs
 @@ -0,0 +1,258 @@

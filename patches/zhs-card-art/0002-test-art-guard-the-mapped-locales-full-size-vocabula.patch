@@ -14,7 +14,7 @@ for a mapped locale, and pins that no mapped locale acquires a derived rung.
  1 file changed, 100 insertions(+), 1 deletion(-)
 
 diff --git a/client/src/services/__tests__/scryfall.test.ts b/client/src/services/__tests__/scryfall.test.ts
-index 0367218edd..57762065b3 100644
+index 0367218ed..57762065b 100644
 --- a/client/src/services/__tests__/scryfall.test.ts
 +++ b/client/src/services/__tests__/scryfall.test.ts
 @@ -13,7 +13,7 @@ import path from "node:path";

@@ -80,7 +80,7 @@ what made the series unreapplicable.
  create mode 100644 scripts/check-card-data-compat.mjs
 
 diff --git a/client/src/components/deck-builder/__tests__/PrintingPickerModal.test.tsx b/client/src/components/deck-builder/__tests__/PrintingPickerModal.test.tsx
-index cd07b2f3ee..04f3eab7bf 100644
+index cd07b2f3e..04f3eab7b 100644
 --- a/client/src/components/deck-builder/__tests__/PrintingPickerModal.test.tsx
 +++ b/client/src/components/deck-builder/__tests__/PrintingPickerModal.test.tsx
 @@ -45,10 +45,16 @@ describe("PrintingPickerModal localized art", () => {
@@ -101,7 +101,7 @@ index cd07b2f3ee..04f3eab7bf 100644
      // Hold the locale map in flight so the modal is forced through the state
      // this test exists for: mounted, localized language, no map yet.
 diff --git a/client/src/components/settings/PreferencesModal.tsx b/client/src/components/settings/PreferencesModal.tsx
-index a0972e426d..e9755a7923 100644
+index a0972e426..e9755a792 100644
 --- a/client/src/components/settings/PreferencesModal.tsx
 +++ b/client/src/components/settings/PreferencesModal.tsx
 @@ -112,6 +112,7 @@ const ART_LANGUAGE_LABELS: Record<ArtLanguage, string> = {
@@ -121,7 +121,7 @@ index a0972e426d..e9755a7923 100644
                      <SegmentedControl
                        options={CARD_SIZES}
 diff --git a/client/src/hooks/__tests__/useCardImage.test.tsx b/client/src/hooks/__tests__/useCardImage.test.tsx
-index a5710c87b4..0743521763 100644
+index a5710c87b..074352176 100644
 --- a/client/src/hooks/__tests__/useCardImage.test.tsx
 +++ b/client/src/hooks/__tests__/useCardImage.test.tsx
 @@ -794,6 +794,11 @@ describe("useCardImage", () => {
@@ -233,7 +233,7 @@ index a5710c87b4..0743521763 100644
        void tick;
        return useCardImage("Card", { faceName: "Card", faceIndex: 0 });
 diff --git a/client/src/i18n/__tests__/localeParity.test.ts b/client/src/i18n/__tests__/localeParity.test.ts
-index 9c9be5f0b0..25f099d216 100644
+index 9c9be5f0b..25f099d21 100644
 --- a/client/src/i18n/__tests__/localeParity.test.ts
 +++ b/client/src/i18n/__tests__/localeParity.test.ts
 @@ -72,6 +72,7 @@ const GROUP_BY_LABELS: Record<string, string> = {
@@ -246,7 +246,7 @@ index 9c9be5f0b0..25f099d216 100644
  const isKnownGap = (ns: string, key: string) =>
 diff --git a/client/src/i18n/locales/zhs/common.json b/client/src/i18n/locales/zhs/common.json
 new file mode 100644
-index 0000000000..c9e26c966d
+index 000000000..c9e26c966
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/common.json
 @@ -0,0 +1,448 @@
@@ -700,7 +700,7 @@ index 0000000000..c9e26c966d
 +}
 diff --git a/client/src/i18n/locales/zhs/deck-builder.json b/client/src/i18n/locales/zhs/deck-builder.json
 new file mode 100644
-index 0000000000..5017d8a2de
+index 000000000..5017d8a2d
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/deck-builder.json
 @@ -0,0 +1,303 @@
@@ -1009,7 +1009,7 @@ index 0000000000..5017d8a2de
 +}
 diff --git a/client/src/i18n/locales/zhs/draft.json b/client/src/i18n/locales/zhs/draft.json
 new file mode 100644
-index 0000000000..a3d86f4704
+index 000000000..a3d86f470
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/draft.json
 @@ -0,0 +1,800 @@
@@ -1815,7 +1815,7 @@ index 0000000000..a3d86f4704
 +}
 diff --git a/client/src/i18n/locales/zhs/game.json b/client/src/i18n/locales/zhs/game.json
 new file mode 100644
-index 0000000000..cabebc3dbb
+index 000000000..cabebc3db
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/game.json
 @@ -0,0 +1,2647 @@
@@ -4468,7 +4468,7 @@ index 0000000000..cabebc3dbb
 +}
 diff --git a/client/src/i18n/locales/zhs/menu.json b/client/src/i18n/locales/zhs/menu.json
 new file mode 100644
-index 0000000000..59649d5893
+index 000000000..59649d589
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/menu.json
 @@ -0,0 +1,368 @@
@@ -4842,7 +4842,7 @@ index 0000000000..59649d5893
 +}
 diff --git a/client/src/i18n/locales/zhs/multiplayer.json b/client/src/i18n/locales/zhs/multiplayer.json
 new file mode 100644
-index 0000000000..2e5bd065d8
+index 000000000..2e5bd065d
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/multiplayer.json
 @@ -0,0 +1,355 @@
@@ -5203,7 +5203,7 @@ index 0000000000..2e5bd065d8
 +}
 diff --git a/client/src/i18n/locales/zhs/replay.json b/client/src/i18n/locales/zhs/replay.json
 new file mode 100644
-index 0000000000..e70293dfbf
+index 000000000..e70293dfb
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/replay.json
 @@ -0,0 +1,26 @@
@@ -5235,7 +5235,7 @@ index 0000000000..e70293dfbf
 +}
 diff --git a/client/src/i18n/locales/zhs/settings.json b/client/src/i18n/locales/zhs/settings.json
 new file mode 100644
-index 0000000000..d0437d92f3
+index 000000000..d0437d92f
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/settings.json
 @@ -0,0 +1,547 @@
@@ -5788,7 +5788,7 @@ index 0000000000..d0437d92f3
 +}
 diff --git a/client/src/i18n/locales/zhs/tournament.json b/client/src/i18n/locales/zhs/tournament.json
 new file mode 100644
-index 0000000000..0df3bbc46c
+index 000000000..0df3bbc46
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/tournament.json
 @@ -0,0 +1,156 @@
@@ -5949,7 +5949,7 @@ index 0000000000..0df3bbc46c
 +  }
 +}
 diff --git a/client/src/i18n/resources.test.ts b/client/src/i18n/resources.test.ts
-index 1d57524678..585e1e22c8 100644
+index 1d5752467..585e1e22c 100644
 --- a/client/src/i18n/resources.test.ts
 +++ b/client/src/i18n/resources.test.ts
 @@ -78,7 +78,13 @@ describe("i18n resources", () => {
@@ -5968,7 +5968,7 @@ index 1d57524678..585e1e22c8 100644
    });
  });
 diff --git a/client/src/i18n/resources.ts b/client/src/i18n/resources.ts
-index b60de5bf84..ce0df00804 100644
+index b60de5bf8..ce0df0080 100644
 --- a/client/src/i18n/resources.ts
 +++ b/client/src/i18n/resources.ts
 @@ -8,8 +8,15 @@ const modules = import.meta.glob("./locales/*/*.json", {
@@ -6003,7 +6003,7 @@ index b60de5bf84..ce0df00804 100644
  }
  
 diff --git a/client/src/services/__tests__/scryfall.test.ts b/client/src/services/__tests__/scryfall.test.ts
-index ebe5958598..5692502486 100644
+index ebe595859..569250248 100644
 --- a/client/src/services/__tests__/scryfall.test.ts
 +++ b/client/src/services/__tests__/scryfall.test.ts
 @@ -2098,14 +2098,31 @@ describe("derived card art locales", () => {
@@ -6044,7 +6044,7 @@ index ebe5958598..5692502486 100644
  
    it("drops the English cache-buster, which names no object on that host", async () => {
 diff --git a/client/src/services/engineRuntime.ts b/client/src/services/engineRuntime.ts
-index d73973a2cc..ba0b989aba 100644
+index d73973a2c..ba0b989ab 100644
 --- a/client/src/services/engineRuntime.ts
 +++ b/client/src/services/engineRuntime.ts
 @@ -102,6 +102,41 @@ export interface LocalizedFace {
@@ -6090,7 +6090,7 @@ index d73973a2cc..ba0b989aba 100644
  
  const cardLocalePromises = new Map<string, Promise<Map<string, LocalizedFace>>>();
 diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
-index 0d7619e748..22db17be0f 100644
+index 0d7619e74..22db17be0 100644
 --- a/client/src/services/scryfall.ts
 +++ b/client/src/services/scryfall.ts
 @@ -1270,6 +1270,25 @@ function isPlaceholderImageUrl(url: string): boolean {
@@ -6120,7 +6120,7 @@ index 0d7619e748..22db17be0f 100644
   * Resolve a card's image, falling back to another printing when the preferred
   * one has no art at all.
 diff --git a/client/src/stores/__tests__/preferencesStore.test.ts b/client/src/stores/__tests__/preferencesStore.test.ts
-index 79635cfb09..8dfd3013ae 100644
+index 79635cfb0..8dfd3013a 100644
 --- a/client/src/stores/__tests__/preferencesStore.test.ts
 +++ b/client/src/stores/__tests__/preferencesStore.test.ts
 @@ -381,18 +381,34 @@ describe("preferencesStore", () => {
@@ -6161,7 +6161,7 @@ index 79635cfb09..8dfd3013ae 100644
      localStorage.setItem(
        "phase-preferences",
 diff --git a/client/src/test/fixtures/keyword-payload-wire.json b/client/src/test/fixtures/keyword-payload-wire.json
-index aef6bceef9..cb1e56f03e 100644
+index aef6bceef..cb1e56f03 100644
 --- a/client/src/test/fixtures/keyword-payload-wire.json
 +++ b/client/src/test/fixtures/keyword-payload-wire.json
 @@ -834,11 +834,14 @@
@@ -6185,7 +6185,7 @@ index aef6bceef9..cb1e56f03e 100644
      },
      {
 diff --git a/client/src/viewmodel/__tests__/keywordProps.test.ts b/client/src/viewmodel/__tests__/keywordProps.test.ts
-index 3579dc197f..9895369304 100644
+index 3579dc197..989536930 100644
 --- a/client/src/viewmodel/__tests__/keywordProps.test.ts
 +++ b/client/src/viewmodel/__tests__/keywordProps.test.ts
 @@ -56,6 +56,32 @@ describe("getKeywordDetail", () => {
@@ -6222,7 +6222,7 @@ index 3579dc197f..9895369304 100644
      expect(getKeywordDetail({ Equip: { type: "Cost", shards: ["White"], generic: 2 } })).toBe("{2}{W}");
      expect(getKeywordDetail({ Kicker: { type: "Cost", shards: [], generic: 4 } })).toBe("{4}");
 diff --git a/client/src/viewmodel/keywordProps.ts b/client/src/viewmodel/keywordProps.ts
-index e6211634f4..98b4e4ee34 100644
+index e6211634f..98b4e4ee3 100644
 --- a/client/src/viewmodel/keywordProps.ts
 +++ b/client/src/viewmodel/keywordProps.ts
 @@ -343,25 +343,44 @@ const MANA_COST_KEYWORDS = new Set([
@@ -6278,7 +6278,7 @@ index e6211634f4..98b4e4ee34 100644
  
  type KeywordAbilityCost = Parameters<typeof formatKnownCost>[0];
 diff --git a/client/src/vite-env.d.ts b/client/src/vite-env.d.ts
-index 8bef21faad..cc7d856890 100644
+index 8bef21faa..cc7d85689 100644
 --- a/client/src/vite-env.d.ts
 +++ b/client/src/vite-env.d.ts
 @@ -34,7 +34,6 @@ interface Window {
@@ -6290,7 +6290,7 @@ index 8bef21faad..cc7d856890 100644
  declare const __CHANGELOG_URL__: string;
  declare const __CHANGELOG_META_URL__: string;
 diff --git a/client/src/wasm/engine_wasm.d.ts b/client/src/wasm/engine_wasm.d.ts
-index a938895b34..1e6d6c39de 100644
+index a938895b3..1e6d6c39d 100644
 --- a/client/src/wasm/engine_wasm.d.ts
 +++ b/client/src/wasm/engine_wasm.d.ts
 @@ -342,8 +342,9 @@ export function get_stack_pressure(): any;
@@ -6306,7 +6306,7 @@ index a938895b34..1e6d6c39de 100644
  export function get_viewer_transition_snapshot_js(player_id: number, events: any): any;
  
 diff --git a/client/vite.config.ts b/client/vite.config.ts
-index 1684f1fedd..37a05befde 100644
+index 1684f1fed..37a05befd 100644
 --- a/client/vite.config.ts
 +++ b/client/vite.config.ts
 @@ -212,16 +212,6 @@ function dataFileDefines(mode: string, buildHash: string): Record<string, string
@@ -6327,7 +6327,7 @@ index 1684f1fedd..37a05befde 100644
    for (const filename of manifest) {
      // "card-names.json" → "__CARD_NAMES_URL__"; "card-data.de.json" →
 diff --git a/client/vitest.config.ts b/client/vitest.config.ts
-index 184c1a7cff..f75cf0c4b1 100644
+index 184c1a7cf..f75cf0c4b 100644
 --- a/client/vitest.config.ts
 +++ b/client/vitest.config.ts
 @@ -79,7 +79,6 @@ export default defineConfig({
@@ -6340,7 +6340,7 @@ index 184c1a7cff..f75cf0c4b1 100644
      __STATUS_URL__: JSON.stringify("/status.json"),
 diff --git a/scripts/check-card-data-compat.mjs b/scripts/check-card-data-compat.mjs
 new file mode 100644
-index 0000000000..774a6529e3
+index 000000000..774a6529e
 --- /dev/null
 +++ b/scripts/check-card-data-compat.mjs
 @@ -0,0 +1,102 @@
@@ -6447,7 +6447,7 @@ index 0000000000..774a6529e3
 +);
 +process.exit(unsupported === 0 ? 0 : 1);
 diff --git a/scripts/gen-card-data.sh b/scripts/gen-card-data.sh
-index b5e1dfdb41..f7caba89db 100755
+index b5e1dfdb4..f7caba89d 100755
 --- a/scripts/gen-card-data.sh
 +++ b/scripts/gen-card-data.sh
 @@ -453,9 +453,36 @@ fi

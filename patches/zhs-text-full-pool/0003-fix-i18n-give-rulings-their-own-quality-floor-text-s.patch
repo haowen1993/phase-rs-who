@@ -1,7 +1,7 @@
-From 1e38102b43d9da7b1a420370f153440f556d45ed Mon Sep 17 00:00:00 2001
+From 5968ad1cdd316eb02983532536cac0efb546de83 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 15:28:54 +0800
-Subject: [PATCH 8/8] =?UTF-8?q?fix(i18n):=20give=20rulings=20their=20own?=
+Subject: [PATCH 3/4] =?UTF-8?q?fix(i18n):=20give=20rulings=20their=20own?=
  =?UTF-8?q?=20quality=20floor=20=E2=80=94=20text's=20floor=20was=20starvin?=
  =?UTF-8?q?g=20them?=
 MIME-Version: 1.0
@@ -33,7 +33,7 @@ English rulings covered, which is what this message reports.
  1 file changed, 18 insertions(+), 2 deletions(-)
 
 diff --git a/scripts/gen-zhs-card-text.mjs b/scripts/gen-zhs-card-text.mjs
-index ec5ae7bcdb..51f68a890a 100644
+index ec5ae7bcd..51f68a890 100644
 --- a/scripts/gen-zhs-card-text.mjs
 +++ b/scripts/gen-zhs-card-text.mjs
 @@ -21,6 +21,7 @@

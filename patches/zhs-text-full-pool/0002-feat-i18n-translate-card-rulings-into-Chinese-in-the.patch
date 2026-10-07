@@ -1,7 +1,7 @@
-From 83b9ad0de670a3e61f95a9ac372dd7de6380c992 Mon Sep 17 00:00:00 2001
+From 257121c0b387ceb91ee080869478b41b7613fe86 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 15:26:32 +0800
-Subject: [PATCH 7/8] feat(i18n): translate card rulings into Chinese in the
+Subject: [PATCH 2/4] feat(i18n): translate card rulings into Chinese in the
  sidecar
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -33,12 +33,11 @@ overlay's fallback. Stage-0 (`gpt`) translations stay excluded like the card-tex
 field; `--all-stages` includes them.
 ---
  client/src/hooks/useEngineCardData.ts |  40 +++++--
- client/src/services/engineRuntime.ts  |  35 ++++++
  scripts/gen-zhs-card-text.mjs         | 166 ++++++++++++++++++++++++--
- 3 files changed, 223 insertions(+), 18 deletions(-)
+ 2 files changed, 188 insertions(+), 18 deletions(-)
 
 diff --git a/client/src/hooks/useEngineCardData.ts b/client/src/hooks/useEngineCardData.ts
-index fedb4419e4..e601e05133 100644
+index b8a00dcd9..a818b807e 100644
 --- a/client/src/hooks/useEngineCardData.ts
 +++ b/client/src/hooks/useEngineCardData.ts
 @@ -1,6 +1,7 @@
@@ -49,7 +48,7 @@ index fedb4419e4..e601e05133 100644
    type CardRuling,
    ensureCardLocale,
  } from "../services/engineRuntime";
-@@ -178,6 +179,11 @@ export function useCardParseDetails(cardName: string | null): ParsedItem[] | nul
+@@ -165,6 +166,11 @@ export function useCardParseDetails(cardName: string | null): ParsedItem[] | nul
   * attached to the front face only).
   */
  export function useCardRulings(cardName: string | null): CardRuling[] {
@@ -61,7 +60,7 @@ index fedb4419e4..e601e05133 100644
    const [rulings, setRulings] = useState<CardRuling[]>([]);
  
    useEffect(() => {
-@@ -185,21 +191,37 @@ export function useCardRulings(cardName: string | null): CardRuling[] {
+@@ -172,21 +178,37 @@ export function useCardRulings(cardName: string | null): CardRuling[] {
        setRulings([]);
        return;
      }
@@ -108,54 +107,8 @@ index fedb4419e4..e601e05133 100644
  
    return rulings;
  }
-diff --git a/client/src/services/engineRuntime.ts b/client/src/services/engineRuntime.ts
-index d73973a2cc..ba0b989aba 100644
---- a/client/src/services/engineRuntime.ts
-+++ b/client/src/services/engineRuntime.ts
-@@ -102,6 +102,41 @@ export interface LocalizedFace {
-   name?: string;
-   oracle_text?: string;
-   type_line?: string;
-+  /** Rulings this locale has a translation for, keyed by the NORMALIZED English
-+   *  text of the ruling they translate (see `normalizeRulingText`).
-+   *
-+   * Keyed rather than a positional array because the engine owns its own ruling
-+   * list and any one of them may be untranslated: an array would slide out of
-+   * correspondence and put the wrong Chinese sentence under a ruling. A keyed
-+   * lookup either matches or falls back to English.
-+   *
-+   * Only `zhs` carries this today — the other locales get their text from MTGJSON
-+   * `foreignData`, which has no translated rulings. */
-+  rulings?: Record<string, string>;
-+}
-+
-+/**
-+ * Fold the typography differences between MTGJSON's and Scryfall's copies of the
-+ * same ruling, so the sidecar's key matches the text the engine hands back.
-+ *
-+ * The two sources disagree on curly vs straight quotes, em dash vs `--`, and the
-+ * ellipsis character vs three dots, plus incidental whitespace. Folding those
-+ * finds 99% of rulings where a raw comparison finds 89% (measured over the WHO
-+ * pool). MUST stay identical to `normalizeForMatch` in
-+ * `scripts/gen-zhs-card-text.mjs`, which keys the sidecar with it.
-+ */
-+export function normalizeRulingText(text: string): string {
-+  return text
-+    .replaceAll("\u2019", "'")
-+    .replaceAll("\u2018", "'")
-+    .replaceAll("\u201c", '"')
-+    .replaceAll("\u201d", '"')
-+    .replaceAll("\u2014", "--")
-+    .replaceAll("\u2013", "-")
-+    .replaceAll("\u2026", "...")
-+    .trim()
-+    .split(/\s+/)
-+    .join(" ");
- }
- 
- const cardLocalePromises = new Map<string, Promise<Map<string, LocalizedFace>>>();
 diff --git a/scripts/gen-zhs-card-text.mjs b/scripts/gen-zhs-card-text.mjs
-index b37b29a63a..ec5ae7bcdb 100644
+index b37b29a63..ec5ae7bcd 100644
 --- a/scripts/gen-zhs-card-text.mjs
 +++ b/scripts/gen-zhs-card-text.mjs
 @@ -12,10 +12,15 @@

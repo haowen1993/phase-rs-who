@@ -184,17 +184,60 @@ Time Wipe           默认 tdc #308（2025）→ 无中文
 ### 怎么生成
 
 ```bash
-# 只测 WHO（推荐，约 15 秒）
+# 全池（默认走索引 API，约 6 分钟 / 约 350 次请求）
+./scripts/gen-derived-art-availability.sh zhs
+
+# 只测 WHO（约 5 秒 / 2 次请求）
 ./scripts/gen-derived-art-availability.sh zhs _WHO
 
-# 或测已下载的全部系列
-./scripts/gen-derived-art-availability.sh zhs
+# 索引不可用时退回逐张探测（小时级）
+PHASE_AVAILABILITY_METHOD=probe ./scripts/gen-derived-art-availability.sh zhs
 ```
 
-产出 `client/public/scryfall-images.zhs-available.json`（约 15 KB，398 个 id）。
+产出 `client/public/scryfall-images.zhs-available.json`。
 前端在解析时若发现「当前印刷没有中文图」，就换成**有中文图的第一个印刷**。
 
-⚠️ 脚本里两条规则是**必须**的，改了会得到看似正常但完全错误的覆盖率：
+#### 两种取数方式（默认走索引 API）
+
+大学院废墟**自己有索引 API**，逐印刷直接回答"有没有中文图"：
+
+```
+GET https://mtgch.com/api/v2/result
+      ?q=set:XXX&view=1&page_size=1000&unique=scryfall_id&include_extras=true
+→ items[].id              = Scryfall 印刷 id（与卡池直接对应）
+→ items[].zhs_image_url   = 有中文图 → URL；没有 → null
+```
+
+**实测等价性**：WHO 范围内，索引 API 与逐张探测在全部 1178 个印刷上**答案完全一致**
+（398 个可用，双向 0 分歧），`ids` 列表**逐字节相同**。
+
+| | 逐张探测（旧） | 索引 API（现默认） |
+| --- | --- | --- |
+| 请求数（全池 71,788 印刷） | 约 68,000 | **346** |
+| 耗时 | **小时级** | **355 秒** |
+| 产出 | 40,887 个 id | 同上（一致） |
+
+探测脚本**保留**为 fallback：它只依赖图床本身，索引挂了/没跟上时仍可用。
+两者写出的文档和 `ids` 格式相同，只有 `algorithm` / `source` 记录来源。
+
+#### 两个 API 参数是**必须**的，不是优化
+
+- **`include_extras=true`** —— 索引默认**不含 supplemental 卡牌**，而 WHO 的 40 张位面牌
+  正是 extras。不加这个参数，WHO 的答案是 **358** 而不是 **398**，会**静默丢掉**
+  客户端本会优先使用的图。
+- **`unique=scryfall_id`** —— 默认按 Oracle 对象去重成"一个代表版本"（同一系列返回 318），
+  那个粒度**根本无法回答逐印刷的问题**。
+
+#### 限流：按**请求频率**而非并发
+
+突发请求会拿到 429，且响应**没有** `Retry-After`／限流头可依据，所以节奏由我们控制：
+3 并发 + 共享的请求间隔，遇 429 用**倍增退避 + 抖动**（避免几个 worker 同时回来再造一次突发）。
+
+**真正让这样安全的是覆盖率检查**：只要有任何一个预期印刷没被返回，脚本就**拒绝写文件**，
+所以中断的运行是**大声失败**，而不是把没问过的印刷记成"无中文"。
+这个检查在开发中**抓到过一次真实缺口**（21,510 个印刷）。
+
+⚠️ `PHASE_AVAILABILITY_METHOD=probe` 时，旧两条规则仍然**必须**遵守：
 
 - **必须用 GET，不能用 HEAD。** 该图床对未命中边缘缓存的 HEAD 返回 404、对同一 URL 的 GET
   返回 200。用 HEAD 跑出来是「覆盖率 0%」，而脚本看起来一切正常。
@@ -213,6 +256,7 @@ git format-patch main..HEAD --no-signature --output-directory patches/zhs-card-a
   client/ \
   scripts/gen-derived-art-availability.sh \
   scripts/lib/probe-derived-art-availability.py \
+  scripts/lib/fetch-index-art-availability.py \
   ':(exclude)client/src/viewmodel/keywordProps.ts' \
   ':(exclude)client/src/viewmodel/__tests__/keywordProps.test.ts' \
   ':(exclude)client/src/test/fixtures/keyword-payload-wire.json'

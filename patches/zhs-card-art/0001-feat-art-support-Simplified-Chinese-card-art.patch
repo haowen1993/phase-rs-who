@@ -1,7 +1,7 @@
-From eebc79925db7b6b7a25a8e7bc1e6e9c0db8add94 Mon Sep 17 00:00:00 2001
+From 9f08f87918167f2bc1cf59998ab5d7842c249158 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Sun, 4 Oct 2026 12:26:59 +0800
-Subject: [PATCH 1/7] feat(art): support Simplified Chinese card art
+Subject: [PATCH 1/8] feat(art): support Simplified Chinese card art
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -89,10 +89,10 @@ index 4add61a6de..aefd7136c2 100644
    resolveOracleIdSync: vi.fn(() => null),
    resolvePrintingImageUrl: vi.fn(),
 diff --git a/client/src/components/settings/PreferencesModal.tsx b/client/src/components/settings/PreferencesModal.tsx
-index c51fbbabea..9780288941 100644
+index 948ba65460..a0972e426d 100644
 --- a/client/src/components/settings/PreferencesModal.tsx
 +++ b/client/src/components/settings/PreferencesModal.tsx
-@@ -37,6 +37,7 @@ import {
+@@ -36,6 +36,7 @@ import {
  } from "../../animation/types.ts";
  import type {
    ArtChainEntry,
@@ -100,7 +100,7 @@ index c51fbbabea..9780288941 100644
    CardPreviewMode,
    CardSizePreference,
    CommandZoneDisplay,
-@@ -46,6 +47,7 @@ import type {
+@@ -45,6 +46,7 @@ import type {
    ZoneCollapseMode,
  } from "../../stores/preferencesStore.ts";
  import type { SupportedLng } from "../../i18n/resources.ts";
@@ -139,7 +139,7 @@ index c51fbbabea..9780288941 100644
  const CARD_SIZES: CardSizePreference[] = ["small", "medium", "large"];
  const COMMAND_ZONE_DISPLAYS: CommandZoneDisplay[] = ["auto", "inline", "compact"];
  const ZONE_COLLAPSE_MODES: ZoneCollapseMode[] = ["auto", "on", "off"];
-@@ -183,6 +209,8 @@ export function PreferencesModal({
+@@ -182,6 +208,8 @@ export function PreferencesModal({
  
    const language = usePreferencesStore((s) => s.language);
    const setLanguage = usePreferencesStore((s) => s.setLanguage);
@@ -148,7 +148,7 @@ index c51fbbabea..9780288941 100644
    const cardSize = usePreferencesStore((s) => s.cardSize);
    const commandZoneDisplay = usePreferencesStore((s) => s.commandZoneDisplay);
    const collapseLands = usePreferencesStore((s) => s.collapseLands);
-@@ -399,6 +427,17 @@ export function PreferencesModal({
+@@ -398,6 +426,17 @@ export function PreferencesModal({
                      </div>
                    </SettingGroup>
  
@@ -567,7 +567,7 @@ index 789396e100..a2e51faa81 100644
      explicitPrintingId,
      effectiveOffline,
 diff --git a/client/src/i18n/locales/de/settings.json b/client/src/i18n/locales/de/settings.json
-index 58a6fe9570..2e7807c028 100644
+index 17ea7c9be2..4f6ef27bf5 100644
 --- a/client/src/i18n/locales/de/settings.json
 +++ b/client/src/i18n/locales/de/settings.json
 @@ -29,6 +29,8 @@
@@ -580,7 +580,7 @@ index 58a6fe9570..2e7807c028 100644
      "commandZone": "Kommandozone",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/en/settings.json b/client/src/i18n/locales/en/settings.json
-index a555fbd880..c497f6233d 100644
+index 986ea130db..d0437d92f3 100644
 --- a/client/src/i18n/locales/en/settings.json
 +++ b/client/src/i18n/locales/en/settings.json
 @@ -29,6 +29,8 @@
@@ -593,7 +593,7 @@ index a555fbd880..c497f6233d 100644
      "commandZone": "Command Zone",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/es/settings.json b/client/src/i18n/locales/es/settings.json
-index 02efaa3d40..240c13d82a 100644
+index aa1c3530ad..4168d90fa2 100644
 --- a/client/src/i18n/locales/es/settings.json
 +++ b/client/src/i18n/locales/es/settings.json
 @@ -29,6 +29,8 @@
@@ -606,7 +606,7 @@ index 02efaa3d40..240c13d82a 100644
      "commandZone": "Zona de mando",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/fr/settings.json b/client/src/i18n/locales/fr/settings.json
-index 89046422d0..599cb81e47 100644
+index 268dc1458b..fa65dfde1b 100644
 --- a/client/src/i18n/locales/fr/settings.json
 +++ b/client/src/i18n/locales/fr/settings.json
 @@ -29,6 +29,8 @@
@@ -619,7 +619,7 @@ index 89046422d0..599cb81e47 100644
      "commandZone": "Zone de commandement",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/it/settings.json b/client/src/i18n/locales/it/settings.json
-index cbacad5686..c193cdb136 100644
+index 5670b3c274..7db6ad4cc9 100644
 --- a/client/src/i18n/locales/it/settings.json
 +++ b/client/src/i18n/locales/it/settings.json
 @@ -29,6 +29,8 @@
@@ -632,7 +632,7 @@ index cbacad5686..c193cdb136 100644
      "commandZone": "Zona di comando",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/ja/settings.json b/client/src/i18n/locales/ja/settings.json
-index 76f6838c58..659f69ec15 100644
+index 595e88ad88..0660182fc0 100644
 --- a/client/src/i18n/locales/ja/settings.json
 +++ b/client/src/i18n/locales/ja/settings.json
 @@ -29,6 +29,8 @@
@@ -645,7 +645,7 @@ index 76f6838c58..659f69ec15 100644
      "commandZone": "統率領域",
      "autoPass": "自動パス",
 diff --git a/client/src/i18n/locales/pl/settings.json b/client/src/i18n/locales/pl/settings.json
-index 3f7f5a4b30..4e419dfe8a 100644
+index a61dad8ffd..21f06d6946 100644
 --- a/client/src/i18n/locales/pl/settings.json
 +++ b/client/src/i18n/locales/pl/settings.json
 @@ -29,6 +29,8 @@
@@ -658,7 +658,7 @@ index 3f7f5a4b30..4e419dfe8a 100644
      "commandZone": "Strefa dowodzenia",
      "autoPass": "Auto-Pass",
 diff --git a/client/src/i18n/locales/pt/settings.json b/client/src/i18n/locales/pt/settings.json
-index f56b69e923..1539868c43 100644
+index e0b472d21a..daa7761f94 100644
 --- a/client/src/i18n/locales/pt/settings.json
 +++ b/client/src/i18n/locales/pt/settings.json
 @@ -29,6 +29,8 @@

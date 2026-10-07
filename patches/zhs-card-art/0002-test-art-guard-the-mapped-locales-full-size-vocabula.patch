@@ -1,7 +1,7 @@
-From 5e2f5336f2b5f2cb5859b3ed8a867b72381522e1 Mon Sep 17 00:00:00 2001
+From b55b390063c87104e72748e34aa72e137589ee12 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Sun, 4 Oct 2026 12:59:20 +0800
-Subject: [PATCH 2/7] test(art): guard the mapped locales' full size vocabulary
+Subject: [PATCH 2/8] test(art): guard the mapped locales' full size vocabulary
 
 The derived branch is consulted before the sidecar map, and it returns null for
 art_crop. A guard that grew too greedy, or a short-circuit that stopped falling

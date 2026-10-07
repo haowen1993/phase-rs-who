@@ -651,6 +651,42 @@ const SCRYFALL_IMAGE_HOST = "cards.scryfall.io";
 /** The single host a derived art locale's CDN lives on. */
 const DERIVED_ART_HOST = "images.mtgch.com";
 
+/**
+ * Same-origin path the dev server relays `DERIVED_ART_HOST` through.
+ *
+ * Keep in step with the `/card-art` entry in `vite.config.ts`.
+ */
+const DERIVED_ART_PROXY_PATH = "/card-art";
+
+/**
+ * The origin a derived locale's art URLs are built on.
+ *
+ * That CDN answers EVERY response with `access-control-allow-origin` **twice** —
+ * two of its own layers each add the header, both emitting `*`, measured on every
+ * path including the language-neutral `/sf/` one. A browser rejects a duplicated
+ * CORS header outright, so no `crossOrigin="anonymous"` request to that host can
+ * succeed, and WebGL — which must upload an UNTAINTED image — is therefore unable
+ * to use the Chinese art at all. Ordinary `<img>` display is untouched because it
+ * never asks for CORS, which is exactly why only the cast animation showed English
+ * art while the hand and battlefield showed Chinese.
+ *
+ * The header is the CDN's to fix and it is not ours. What we CAN do is stop making
+ * a cross-origin request: the dev server relays the host at a same-origin path, and
+ * a SAME-ORIGIN image is exempt from the CORS check entirely. The relay is Node, so
+ * the duplicate header never reaches the browser — and a same-origin image does not
+ * taint the canvas, so the WebGL path is satisfied too.
+ *
+ * Gated on `DEV` so a production build served without that relay keeps the direct
+ * host — today's behaviour, rather than a URL that cannot resolve. A deployment
+ * that adds the same relay opts in with `VITE_ART_PROXY=1`.
+ */
+function derivedArtBase(): string {
+  if (import.meta.env.DEV || import.meta.env.VITE_ART_PROXY === "1") {
+    return DERIVED_ART_PROXY_PATH;
+  }
+  return `https://${DERIVED_ART_HOST}`;
+}
+
 export interface DerivedArtSource {
   /** URL for a five-segment Scryfall image URL, or null when this rung does not exist. */
   readonly url: string;
@@ -696,7 +732,7 @@ function derivedArtSource(url: string, lang: DerivedArtLocale): DerivedArtSource
   const dot = filename.indexOf(".");
   if (dot < 0) return null;
   const printingId = filename.slice(0, dot);
-  const base = `https://${DERIVED_ART_HOST}`;
+  const base = derivedArtBase();
   const path = `${size}/${face}/${shardA}/${shardB}/${printingId}.webp`;
   // Written out rather than `lang` interpolated straight in: the prefix is a
   // third-party path contract, and spelling both keeps them greppable together.

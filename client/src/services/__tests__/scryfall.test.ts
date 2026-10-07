@@ -112,6 +112,20 @@ function validPrintingEntry() {
   };
 }
 
+// Every URL assertion in this file is about the PATH a Scryfall URL is derived
+// into — the printing id, the size, the face, the locale prefix. Which ORIGIN
+// those paths hang off is a separate transport decision, and under Vitest `DEV`
+// is true, so the derived locale would otherwise build its relay prefix here and
+// every such assertion would have to spell that prefix out. Pin it off file-wide
+// and exercise the relay explicitly in its own block below.
+beforeEach(() => {
+  vi.stubEnv("DEV", false);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("local Scryfall data authorities", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -2531,5 +2545,65 @@ describe("mapped locales keep their full size vocabulary", () => {
     // mapped codes as derived ones.
     expect(isDerivedArtLocale("pl")).toBe(false);
     expect(isDerivedArtLocale("en")).toBe(false);
+  });
+});
+
+/**
+ * The relay exists because the derived locale's CDN sends
+ * `access-control-allow-origin` twice on every response, which a browser rejects
+ * outright — so WebGL, which must upload an untainted image, could not use Chinese
+ * art at all. A SAME-ORIGIN image is exempt from the check, so the dev server
+ * relays the host and these tests pin the resulting origin.
+ *
+ * The PATH is deliberately identical across all three cases; only the origin
+ * moves. That is what makes the relay a transport detail rather than a second
+ * derivation, and it is why the assertions above can pin the CDN origin.
+ */
+describe("derived art relay", () => {
+  const EN_ID = "0dbac7ce-a6fa-466e-b6ba-173cf2dec98e";
+  const PATH = `zhs/normal/front/${EN_ID[0]}/${EN_ID[1]}/${EN_ID}.webp`;
+
+  const printing = (id: string): PrintingEntry => ({
+    id,
+    set: "mid",
+    set_name: "Innistrad: Midnight Hunt",
+    collector_number: "7",
+    released_at: "2021-09-24",
+    border_color: "black",
+    frame_effects: [],
+    full_art: false,
+    faces: [
+      {
+        small: `https://cards.scryfall.io/small/front/${id[0]}/${id[1]}/${id}.jpg`,
+        normal: `https://cards.scryfall.io/normal/front/${id[0]}/${id[1]}/${id}.jpg`,
+        art_crop: `https://cards.scryfall.io/art_crop/front/${id[0]}/${id[1]}/${id}.jpg`,
+      },
+    ],
+  });
+
+  const resolve = async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("zhs");
+    return mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal");
+  };
+
+  it("goes same-origin when the dev server serves the relay", async () => {
+    vi.stubEnv("DEV", true);
+    vi.stubEnv("VITE_ART_PROXY", "");
+    expect(await resolve()).toBe(`/card-art/${PATH}`);
+  });
+
+  it("goes same-origin in a production build that opts in", async () => {
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_ART_PROXY", "1");
+    expect(await resolve()).toBe(`/card-art/${PATH}`);
+  });
+
+  it("keeps the CDN's own origin where no relay is served", async () => {
+    // The production default, and today's behaviour: a build with no relay must
+    // not emit a URL that cannot resolve.
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_ART_PROXY", "");
+    expect(await resolve()).toBe(`https://images.mtgch.com/${PATH}`);
   });
 });

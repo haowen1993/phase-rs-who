@@ -535,6 +535,20 @@ export default defineConfig(({ mode }) => {
         target: process.env.VITE_IMPORT_DECK_PROXY ?? "http://localhost:8787",
         changeOrigin: true,
       },
+      // Relay the derived-locale art CDN so the browser makes a SAME-ORIGIN
+      // request for Chinese card art. That host sends
+      // `access-control-allow-origin` twice on every response, which a browser
+      // rejects outright — so a `crossOrigin="anonymous"` request for it can
+      // never succeed and WebGL (which must upload an untainted image) could not
+      // use Chinese art at all. A same-origin image is exempt from the CORS check,
+      // and Node does not care what headers the far side duplicates.
+      //
+      // Keep in step with `DERIVED_ART_PROXY_PATH` in `src/services/scryfall.ts`.
+      "/card-art": {
+        target: `https://${process.env.VITE_ART_CDN_HOST ?? "images.mtgch.com"}`,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/card-art/, ""),
+      },
     },
   },
   build: {

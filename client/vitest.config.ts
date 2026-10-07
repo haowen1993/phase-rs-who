@@ -79,7 +79,6 @@ export default defineConfig({
       __CARD_DATA_META_URL__: JSON.stringify("/card-data-meta.json"),
     __CARD_DATA_LOCALE_URL_TEMPLATE__: JSON.stringify("/card-data.{lng}.json"),
     __SCRYFALL_IMAGES_LOCALE_URL_TEMPLATE__: JSON.stringify("/scryfall-images.v2.{lng}.json"),
-    __SCRYFALL_IMAGES_AVAILABILITY_URL_TEMPLATE__: JSON.stringify("/scryfall-images.{lng}-available.json"),
     __CHANGELOG_URL__: JSON.stringify("/changelog.json"),
     __CHANGELOG_META_URL__: JSON.stringify("/changelog-meta.json"),
     __STATUS_URL__: JSON.stringify("/status.json"),

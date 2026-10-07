@@ -160,91 +160,46 @@ https://images.mtgch.com/sf/normal/front/f/2/<uuid>.webp      ← 同一图床�
 还有 by-ref 与 by-oracle-id 两个入口）。修一处之后，**必须把每条路径都过一遍**，
 而且每条路径都要有自己的回归测试。
 
-## 必须补的一步：生成「中文可用性表」（补丁 0005 / 0006）
+## 不需要可用性表（曾经的补丁 0005 / 0006，已删除）
 
-**不做这一步，中文卡图只会有时出现、有时不出现。**
+**早先的设计**：先生成一张「哪些印刷有中文图」的表（`scryfall-images.zhs-available.json`），
+前端查表后**改选一个**有中文图的印刷。
 
-### 为什么需要它
+**那个设计是错的，已整体移除。** 它带来三个问题，而且第三个是致命的：
 
-应用渲染的是 `scryfall-data.json` 里记的那个印刷，而那是**最新**的印刷。中文图是**逐印刷**
-存在的，而且**无法从任何 Scryfall 字段推导**——大学院废墟把社区汉化图挂在**英文印刷的 id**
-下，同一个系列内部也没有规律：
+1. 多一个 1.6 MB 的构建产物，每次都要重新生成
+2. 多一个取数脚本（先探测 CDN，后改走大学院废墟索引 API）
+3. **它要求"选一个印刷"，而每个调用点会各自选一次** —— 于是同一张牌在
+   手牌里是 `2x2 #454`（中文）、在堆叠里是 `2x2 #123`（英文），同一帧、同一张牌、两种结果
 
-```
-Temple of Mystery   默认 soc #414（2026）→ 无中文
-                    实际 who #318         → 有中文 ✅
-Time Wipe           默认 tdc #308（2025）→ 无中文
-                    实际 who #238         → 有中文 ✅
-
-同一张牌的 WHO 内部：#318 有中文，#528 / #909 / #1119 都没有
-```
-
-实测 WHO 全部 1178 个印刷：**398 个（33%）有中文图**。
-
-### 怎么生成
-
-```bash
-# 全池（默认走索引 API，约 6 分钟 / 约 350 次请求）
-./scripts/gen-derived-art-availability.sh zhs
-
-# 只测 WHO（约 5 秒 / 2 次请求）
-./scripts/gen-derived-art-availability.sh zhs _WHO
-
-# 索引不可用时退回逐张探测（小时级）
-PHASE_AVAILABILITY_METHOD=probe ./scripts/gen-derived-art-availability.sh zhs
-```
-
-产出 `client/public/scryfall-images.zhs-available.json`。
-前端在解析时若发现「当前印刷没有中文图」，就换成**有中文图的第一个印刷**。
-
-#### 两种取数方式（默认走索引 API）
-
-大学院废墟**自己有索引 API**，逐印刷直接回答"有没有中文图"：
+### 现在的做法：无条件改写，用 404 驱动
 
 ```
-GET https://mtgch.com/api/v2/result
-      ?q=set:XXX&view=1&page_size=1000&unique=scryfall_id&include_extras=true
-→ items[].id              = Scryfall 印刷 id（与卡池直接对应）
-→ items[].zhs_image_url   = 有中文图 → URL；没有 → null
+cards.scryfall.io/normal/front/f/2/<uuid>.jpg      ← 应用原本输出
+        │  无条件改写（不查表、不选印刷、保留同一个 uuid）
+        ▼
+images.mtgch.com/zhs/normal/front/f/2/<uuid>.webp  ← 中文
+        │  404（该印刷没有中文图）
+        ▼
+images.mtgch.com/sf/normal/front/f/2/<uuid>.webp   ← 该图床的英文图
 ```
 
-**实测等价性**：WHO 范围内，索引 API 与逐张探测在全部 1178 个印刷上**答案完全一致**
-（398 个可用，双向 0 分歧），`ids` 列表**逐字节相同**。
+**判据就是 404**，不需要任何预先测量的数据。`derivedArtSource` 一直就返回
+`{ url, fallback }` 两级，应用本来就有走阶梯的能力（`assetFallbackSources` +
+`advanceFailedSource`），只是被查表逻辑挡住了。
 
-| | 逐张探测（旧） | 索引 API（现默认） |
-| --- | --- | --- |
-| 请求数（全池 71,788 印刷） | 约 68,000 | **346** |
-| 耗时 | **小时级** | **355 秒** |
-| 产出 | 40,887 个 id | 同上（一致） |
+**为什么这样就一致了**：同一张牌永远是同一个印刷 —— 因为"选哪个印刷"这件事
+**根本不再发生**。没有可分歧的地方，也就不需要跨区域协调。
 
-探测脚本**保留**为 fallback：它只依赖图床本身，索引挂了/没跟上时仍可用。
-两者写出的文档和 `ids` 格式相同，只有 `algorithm` / `source` 记录来源。
+实测全池 90,669 个印刷：**35% 直接出中文图，65% 走 404 降级到 `sf`**；
+`sf` 层抽查 8/8 全部存在，所以阶梯不需要第三级。
 
-#### 两个 API 参数是**必须**的，不是优化
+（`sf` 是大学院废墟对 Scryfall 英文图的完整镜像，所以"降级"不是"变差"。）
 
-- **`include_extras=true`** —— 索引默认**不含 supplemental 卡牌**，而 WHO 的 40 张位面牌
-  正是 extras。不加这个参数，WHO 的答案是 **358** 而不是 **398**，会**静默丢掉**
-  客户端本会优先使用的图。
-- **`unique=scryfall_id`** —— 默认按 Oracle 对象去重成"一个代表版本"（同一系列返回 318），
-  那个粒度**根本无法回答逐印刷的问题**。
+### 插画裁切走 `sf` 层
 
-#### 限流：按**请求频率**而非并发
-
-突发请求会拿到 429，且响应**没有** `Retry-After`／限流头可依据，所以节奏由我们控制：
-3 并发 + 共享的请求间隔，遇 429 用**倍增退避 + 抖动**（避免几个 worker 同时回来再造一次突发）。
-
-**真正让这样安全的是覆盖率检查**：只要有任何一个预期印刷没被返回，脚本就**拒绝写文件**，
-所以中断的运行是**大声失败**，而不是把没问过的印刷记成"无中文"。
-这个检查在开发中**抓到过一次真实缺口**（21,510 个印刷）。
-
-⚠️ `PHASE_AVAILABILITY_METHOD=probe` 时，旧两条规则仍然**必须**遵守：
-
-- **必须用 GET，不能用 HEAD。** 该图床对未命中边缘缓存的 HEAD 返回 404、对同一 URL 的 GET
-  返回 200。用 HEAD 跑出来是「覆盖率 0%」，而脚本看起来一切正常。
-- **用 `Range: bytes=0-0`**，每次只取 1 字节（存在 206、不存在 404），不必下载整池图片。
-
-重试后仍失败的探测会**单独计数并告警**，不会混进「无中文」——否则一次网络抖动就会让某个
-本来有中文的印刷被永久跳过。
+`art_crop` 改写时**直接指向语言中性的前缀**，因为插画与语言无关，而该图床
+**没有** `zhs/art_crop`（实测 404）。走 `zhs` 会白白浪费一次 404。
 
 ## 重新生成本系列（实测可用的确切命令）
 
@@ -254,9 +209,6 @@ GET https://mtgch.com/api/v2/result
 # 在 patches/zhs-card-art 分支上
 git format-patch main..HEAD --no-signature --output-directory patches/zhs-card-art -- \
   client/ \
-  scripts/gen-derived-art-availability.sh \
-  scripts/lib/probe-derived-art-availability.py \
-  scripts/lib/fetch-index-art-availability.py \
   ':(exclude)client/src/viewmodel/keywordProps.ts' \
   ':(exclude)client/src/viewmodel/__tests__/keywordProps.test.ts' \
   ':(exclude)client/src/test/fixtures/keyword-payload-wire.json'

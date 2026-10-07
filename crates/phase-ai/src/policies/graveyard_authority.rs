@@ -463,6 +463,7 @@ mod tests {
                 frequency,
                 play_mode: CardPlayMode::Cast,
                 graveyard_destination_replacement: None,
+                leave_battlefield_replacement: false,
                 extra_cost: None,
                 enters_with_counter: None,
                 required_cast_keyword: None,
@@ -546,6 +547,7 @@ mod tests {
                 frequency: CastFrequency::Unlimited,
                 play_mode: CardPlayMode::Cast,
                 graveyard_destination_replacement: None,
+                leave_battlefield_replacement: false,
                 extra_cost: Some(CastExtraCost {
                     cost,
                     mode: CastCostMode::Additional,

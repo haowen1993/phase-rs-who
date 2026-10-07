@@ -21,6 +21,7 @@
 //   node scripts/gen-zhs-card-text.mjs --release data-2026-10-04
 //   node scripts/gen-zhs-card-text.mjs --all-stages       # include stage 0
 //   node scripts/gen-zhs-card-text.mjs --skip-rulings     # text fields only
+//   node scripts/gen-zhs-card-text.mjs --strict-ruling-stage  # drop stage-0 rulings
 //   node scripts/gen-zhs-card-text.mjs --dry-run          # report, write nothing
 //
 // Output: client/public/card-data.zhs.json
@@ -63,6 +64,21 @@ const URL = `https://github.com/HeliumOctahelide/magic-cards-zhs/releases/downlo
 // the difference between "we ship translations" and "we ship whatever was in the
 // field that day", so it is the default; `--all-stages` opts back in.
 const MIN_STAGE = allStages ? 0 : 5;
+
+/** Rulings keep their OWN floor, and it defaults to "everything".
+ *
+ * The card-text floor exists because a low-tier Oracle record is an alternative to
+ * a good one — you either read the card in Chinese or you do not. Rulings are not
+ * like that: a card has several, so a floor drops SOME of a card's rulings and
+ * leaves the panel mixing Chinese and English sentences. Measured over the pool,
+ * stage 5+ covers 17,290 of the engine's 32,920 distinct rulings (52.5%) while
+ * including stage 0 covers 32,835 (99.7%) — and the stage-0 rows are machine
+ * translations that keep the project's terminology consistent ("触发式异能",
+ * "阻挡生物", "海岛"). Given the choice between a readable Chinese sentence and an
+ * English one in a Chinese card panel, the Chinese one wins by default.
+ *
+ * `--text-stage-floor` / `--strict-ruling-stage` restore the filtered behaviour. */
+const MIN_RULING_STAGE = flag("strict-ruling-stage") ? MIN_STAGE : 0;
 
 /** Un-escape the dataset's one systematic malformation.
  *
@@ -264,7 +280,7 @@ async function loadRulingTranslations() {
       stats.noTranslation += 1;
       continue;
     }
-    if ((record.stage ?? -1) < MIN_STAGE) {
+    if ((record.stage ?? -1) < MIN_RULING_STAGE) {
       stats.belowStage += 1;
       continue;
     }
@@ -273,7 +289,7 @@ async function loadRulingTranslations() {
   console.log(
     `rulings: ${translations.size} translations ` +
       `(${stats.lines} records, ${stats.malformed} malformed, ` +
-      `${stats.belowStage} below stage ${MIN_STAGE}, ${stats.noTranslation} untranslated)`,
+      `${stats.belowStage} below stage ${MIN_RULING_STAGE}, ${stats.noTranslation} untranslated)`,
   );
   return translations;
 }

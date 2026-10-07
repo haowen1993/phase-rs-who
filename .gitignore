@@ -144,3 +144,9 @@ triage/dashboard.md
 # Changelog backfill drafts — review staging only, never committed. The
 # canonical changelog lives at client/public/changelog.json.
 scripts/changelog/backfill-drafts.json
+
+# 大学院废墟 (magic-cards-zhs) weekly export cache — the ~74 MB tarball and its
+# extraction, downloaded on demand by scripts/gen-zhs-card-text.mjs. The derived
+# sidecar it produces (`client/public/card-data.zhs.json`) is already covered by
+# the `client/public/card-data.*.json` rule above.
+.zhs-cache/

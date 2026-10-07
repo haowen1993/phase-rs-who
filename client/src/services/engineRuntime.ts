@@ -126,14 +126,18 @@ export interface LocalizedFace {
  * `scripts/gen-zhs-card-text.mjs`, which keys the sidecar with it.
  */
 export function normalizeRulingText(text: string): string {
+  // `replace` with a global regex rather than `replaceAll`: this target is ES2020
+  // (`tsconfig.app.json`), where `String.prototype.replaceAll` does not exist, and
+  // the failing check is `tsc -b`, not `tsc -p tsconfig.json`. Each pattern is a
+  // single literal character, so the two forms are interchangeable.
   return text
-    .replaceAll("\u2019", "'")
-    .replaceAll("\u2018", "'")
-    .replaceAll("\u201c", '"')
-    .replaceAll("\u201d", '"')
-    .replaceAll("\u2014", "--")
-    .replaceAll("\u2013", "-")
-    .replaceAll("\u2026", "...")
+    .replace(/\u2019/g, "'")
+    .replace(/\u2018/g, "'")
+    .replace(/\u201c/g, '"')
+    .replace(/\u201d/g, '"')
+    .replace(/\u2014/g, "--")
+    .replace(/\u2013/g, "-")
+    .replace(/\u2026/g, "...")
     .trim()
     .split(/\s+/)
     .join(" ");

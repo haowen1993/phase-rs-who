@@ -1,48 +1,60 @@
-From 601ff4f2c2318428a5982d733f245d08749017e3 Mon Sep 17 00:00:00 2001
+From 5d2a5dc30a2d838bf6c92d76a11e86823cb2821b Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
-Date: Wed, 7 Oct 2026 21:30:44 +0800
-Subject: [PATCH] feat(zh): merge Chinese card art and card text into ONE
- localization series
+Date: Wed, 7 Oct 2026 22:58:43 +0800
+Subject: [PATCH] feat(zh): Chinese card art and card text as ONE localization
+ series
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-They were two series and could not be stacked. Every reason came down to the same
-thing: the split was artificial. Both halves write the SAME files —
-`preferencesStore.ts`, `PreferencesModal.tsx`, and the `settings.json` catalogs —
-so as separate series each carried half a change to a shared file and they
-conflicted no matter which order they were applied in.
+Card art and card text are one feature — "the game is in Chinese" — reached
+through one control, the interface language. `artLanguage` defaults to `"auto"`,
+which follows it.
 
-They are one feature: "the game is in Chinese". Card art and card text are two
-surfaces of it, not two capabilities, and the player reaches both through one
-control (the interface language, which `artLanguage: "auto"` follows). One series,
-one application, no conflict.
+They were two series and could not be stacked, and the split was the whole reason:
+both halves write the SAME files (`preferencesStore.ts`, `PreferencesModal.tsx`,
+the `settings.json` catalogs), so as separate series each carried half a change to
+a shared file and they conflicted in every order. As one patch there is nothing to
+conflict with.
 
-This is the engine base plus the localization content, so applying it produces a
-complete Chinese install. The engine support remains its own series and is applied
-first; only `client/` and the card-text generator are touched here.
+Applied ON TOP of the engine series, which stays engine-only. Verified on a clean
+checkout of the latest upstream: engine applies, then this, and the result
+type-checks.
+
+Card art is a DERIVED locale: the URL is computed from the English printing id the
+app already holds, so localization needs no generated data. It is fetched through a
+same-origin relay because that CDN sends `access-control-allow-origin` twice on
+every response and a browser rejects a duplicated CORS header outright — which is
+why WebGL, needing an untainted image, showed English art on the cast animation
+while every `<img>` showed Chinese.
+
+Card TEXT does need generated data and `scripts/gen-zhs-card-text.mjs` produces it
+from the 大学院废墟 (HeliumOctahelide/magic-cards-zhs) export; the sidecar itself is
+not tracked.
+
+Upstream's locale pipeline cannot serve either: Scryfall publishes no Simplified
+Chinese printings at all.
 ---
- client/node_modules                           |    1 +
  .../GameCardPreview.imageLifecycle.test.tsx   |    4 +
  .../__tests__/PrintingPickerModal.test.tsx    |    6 +
- .../components/settings/PreferencesModal.tsx  |   18 +-
+ .../components/settings/PreferencesModal.tsx  |    8 +
  client/src/components/ui/LanguageFlag.tsx     |   26 +
  .../src/hooks/__tests__/useCardImage.test.tsx |  109 +-
  client/src/hooks/useCardImage.ts              |   95 +-
  client/src/hooks/useEngineCardData.ts         |   57 +-
  .../src/i18n/__tests__/localeParity.test.ts   |    1 +
- client/src/i18n/locales/de/settings.json      |   24 +-
- client/src/i18n/locales/en/settings.json      |   24 +-
- client/src/i18n/locales/es/settings.json      |   24 +-
- client/src/i18n/locales/fr/settings.json      |   24 +-
- client/src/i18n/locales/it/settings.json      |   24 +-
- client/src/i18n/locales/ja/settings.json      |   24 +-
- client/src/i18n/locales/pl/settings.json      |   24 +-
- client/src/i18n/locales/pt/settings.json      |   24 +-
+ client/src/i18n/locales/de/settings.json      |    8 +-
+ client/src/i18n/locales/en/settings.json      |    8 +-
+ client/src/i18n/locales/es/settings.json      |    8 +-
+ client/src/i18n/locales/fr/settings.json      |    8 +-
+ client/src/i18n/locales/it/settings.json      |    8 +-
+ client/src/i18n/locales/ja/settings.json      |    8 +-
+ client/src/i18n/locales/pl/settings.json      |    8 +-
+ client/src/i18n/locales/pt/settings.json      |    8 +-
  client/src/i18n/locales/zhs/common.json       |  448 +++
  client/src/i18n/locales/zhs/deck-builder.json |  303 ++
  client/src/i18n/locales/zhs/draft.json        |  800 +++++
- client/src/i18n/locales/zhs/game.json         | 2645 +++++++++++++++++
+ client/src/i18n/locales/zhs/game.json         | 2647 +++++++++++++++++
  client/src/i18n/locales/zhs/menu.json         |  368 +++
  client/src/i18n/locales/zhs/multiplayer.json  |  355 +++
  client/src/i18n/locales/zhs/replay.json       |   26 +
@@ -50,18 +62,18 @@ first; only `client/` and the card-text generator are touched here.
  client/src/i18n/locales/zhs/tournament.json   |  156 +
  client/src/i18n/resources.test.ts             |    8 +-
  client/src/i18n/resources.ts                  |   17 +-
- .../src/services/__tests__/scryfall.test.ts   |  526 ++++
+ .../src/services/__tests__/scryfall.test.ts   |  600 ++++
  client/src/services/cardArtLocale.ts          |   54 +
  client/src/services/cardTextLocale.ts         |   91 +
  client/src/services/engineRuntime.ts          |   35 +
- client/src/services/scryfall.ts               |  261 +-
+ client/src/services/scryfall.ts               |  297 +-
  .../__tests__/candidateKeys.test.ts           |   41 +
  client/src/services/visualPacks/types.ts      |    9 +-
  .../stores/__tests__/preferencesStore.test.ts |    6 +-
  client/src/stores/preferencesStore.ts         |   82 +
+ client/vite.config.ts                         |   14 +
  scripts/gen-zhs-card-text.mjs                 |  422 +++
- 38 files changed, 7634 insertions(+), 77 deletions(-)
- create mode 120000 client/node_modules
+ 38 files changed, 7637 insertions(+), 61 deletions(-)
  create mode 100644 client/src/i18n/locales/zhs/common.json
  create mode 100644 client/src/i18n/locales/zhs/deck-builder.json
  create mode 100644 client/src/i18n/locales/zhs/draft.json
@@ -75,14 +87,6 @@ first; only `client/` and the card-text generator are touched here.
  create mode 100644 client/src/services/cardTextLocale.ts
  create mode 100644 scripts/gen-zhs-card-text.mjs
 
-diff --git a/client/node_modules b/client/node_modules
-new file mode 120000
-index 000000000..7ba10ae67
---- /dev/null
-+++ b/client/node_modules
-@@ -0,0 +1 @@
-+/Users/mouhaowen/phase-rs-who/client/node_modules
-\ No newline at end of file
 diff --git a/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx b/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx
 index 4add61a6d..aefd7136c 100644
 --- a/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx
@@ -120,25 +124,9 @@ index cd07b2f3e..04f3eab7b 100644
      // Hold the locale map in flight so the modal is forced through the state
      // this test exists for: mounted, localized language, no map yet.
 diff --git a/client/src/components/settings/PreferencesModal.tsx b/client/src/components/settings/PreferencesModal.tsx
-index c51fbbabe..a93721983 100644
+index 948ba6546..a93721983 100644
 --- a/client/src/components/settings/PreferencesModal.tsx
 +++ b/client/src/components/settings/PreferencesModal.tsx
-@@ -31,7 +31,6 @@ import {
-   PACING_MAX,
-   PACING_MIN,
-   PACING_STEP,
--  type CardAnimationStyle,
-   type PacingCategory,
-   type VfxQuality,
- } from "../../animation/types.ts";
-@@ -49,6 +48,7 @@ import type { SupportedLng } from "../../i18n/resources.ts";
- import { LanguageFlag } from "../ui/LanguageFlag.tsx";
- import { BATTLEFIELDS } from "../board/battlefields.ts";
- import { PLAIN_BACKGROUNDS } from "../board/plainBackgrounds.ts";
-+import { CardAnimationStylePicker } from "./CardAnimationStylePicker.tsx";
- import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
- import { ModalPanelShell } from "../ui/ModalPanelShell";
- import { MenuSelect } from "../ui/MenuSelect";
 @@ -76,6 +76,13 @@ interface PreferencesModalProps {
  /** Locale options for the language selector. Labels are autonyms (each language's
   *  own name) and are intentionally NOT translated. */
@@ -161,28 +149,6 @@ index c51fbbabe..a93721983 100644
  const CARD_SIZES: CardSizePreference[] = ["small", "medium", "large"];
  const COMMAND_ZONE_DISPLAYS: CommandZoneDisplay[] = ["auto", "inline", "compact"];
  const ZONE_COLLAPSE_MODES: ZoneCollapseMode[] = ["auto", "on", "off"];
-@@ -94,7 +102,6 @@ const DRAFT_CARD_PREVIEW_MODES: DraftCardPreviewMode[] = ["none", ...CARD_PREVIE
- const DRAFT_DOUBLE_CLICK_CONFIRM_PICK_OPTIONS: Array<"disabled" | "enabled"> = ["disabled", "enabled"];
- const SPELL_PAYMENT_MODES: SpellPaymentMode[] = ["auto", "autoExceptSacrificialMana", "manual"];
- const VFX_QUALITIES: VfxQuality[] = ["full", "reduced", "minimal"];
--const CARD_ANIMATION_STYLES: CardAnimationStyle[] = ["webgl", "classic"];
- const MULTIPLAYER_BOARD_LAYOUTS: MultiplayerBoardLayout[] = ["auto", "focused", "split"];
- 
- /** Format a speed value as a user-facing label. The slider goes 0→max where
-@@ -554,12 +561,7 @@ export function PreferencesModal({
-                   </SettingGroup>
- 
-                   <SettingGroup label={t("visual.cardAnimationStyle")}>
--                    <SegmentedControl
--                      options={CARD_ANIMATION_STYLES}
--                      value={cardAnimationStyle}
--                      onChange={setCardAnimationStyle}
--                      renderLabel={(opt) => t(`visual.cardAnimationStyleOptions.${opt}`)}
--                    />
-+                    <CardAnimationStylePicker value={cardAnimationStyle} onChange={setCardAnimationStyle} />
-                   </SettingGroup>
- 
-                   <SettingGroup label={t("visual.keywordStrip")}>
 diff --git a/client/src/components/ui/LanguageFlag.tsx b/client/src/components/ui/LanguageFlag.tsx
 index b6445e446..0cef08d38 100644
 --- a/client/src/components/ui/LanguageFlag.tsx
@@ -817,7 +783,7 @@ index 9c9be5f0b..25f099d21 100644
  
  const isKnownGap = (ns: string, key: string) =>
 diff --git a/client/src/i18n/locales/de/settings.json b/client/src/i18n/locales/de/settings.json
-index f8b2dce98..c9eb67b2e 100644
+index 17ea7c9be..c9eb67b2e 100644
 --- a/client/src/i18n/locales/de/settings.json
 +++ b/client/src/i18n/locales/de/settings.json
 @@ -29,6 +29,8 @@
@@ -840,42 +806,7 @@ index f8b2dce98..c9eb67b2e 100644
    },
    "visual": {
      "title": "Grafik",
-@@ -127,7 +131,9 @@
-     "cardAnimationStyleOptions": {
-       "webgl": "Neu",
-       "classic": "Klassisch"
--    }
-+    },
-+    "cardAnimationPreviewHintHover": "Zum Ansehen darüberfahren",
-+    "cardAnimationPreviewHintTap": "Zum Ansehen tippen"
-   },
-   "flexLayout": {
-     "title": "Flexibles Layout",
-@@ -506,11 +512,23 @@
-     "apiKey": "API-Schlüssel",
-     "apiKeyPlaceholder": "API-Schlüssel einfügen",
-     "apiKeyOptional": "Bei lokalen Servern optional",
-+    "apiKeyMissing": "Gib deinen API-Schlüssel erneut ein. Schlüssel bleiben nach einem Neuladen nicht erhalten, und dieser Anbieter wird erst danach für KI-Plätze oder Draft-Bots verwendet.",
-     "apiKeyStorage": "Nur für diese Browsersitzung im Arbeitsspeicher. API-Schlüssel werden nie auf die Festplatte geschrieben und sind vom Backup-Export und der Cloud-Synchronisierung ausgenommen — nach einem Neuladen gibst du ihn erneut ein. Ein API-Schlüssel verlangt außerdem einen https://-Endpunkt, sofern der Server nicht auf localhost läuft.",
-     "apiKeyGet": "Schlüssel holen",
-     "test": "Verbindung testen",
-     "testing": "Test läuft …",
-     "testOk": "Verbunden.",
-+    "defaultPrompt": {
-+      "connected": "Verbunden. Als Standard-Gegner verwenden?",
-+      "ready": "Diesen Anbieter als Standard-Gegner verwenden?",
-+      "action": "Als Standard verwenden",
-+      "badge": "Standard-Gegner"
-+    },
-+    "defaultOpponent": {
-+      "label": "Standard-Gegner",
-+      "hint": "KI-Gegner nutzen diesen Anbieter, sofern du beim Einrichten einer Partie für einen Platz keinen anderen wählst. Das gilt auch für den Gegner in Draft-Partien.",
-+      "engine": "Integrierte Engine-KI"
-+    },
-     "draftToggle": {
-       "label": "Für Draft-Bots verwenden",
-       "hint": "Bot-Plätze in einem Draft wählen mit dem Modell, samt Set-Kontext des Formats.",
-@@ -528,4 +546,4 @@
+@@ -542,4 +546,4 @@
        "oversized": "Der Endpunkt hat weit mehr Daten zurückgegeben, als eine Chat-Antwort umfasst."
      }
    }
@@ -883,7 +814,7 @@ index f8b2dce98..c9eb67b2e 100644
 +}
 \ No newline at end of file
 diff --git a/client/src/i18n/locales/en/settings.json b/client/src/i18n/locales/en/settings.json
-index 1e89fd655..af3bae287 100644
+index 986ea130d..af3bae287 100644
 --- a/client/src/i18n/locales/en/settings.json
 +++ b/client/src/i18n/locales/en/settings.json
 @@ -29,6 +29,8 @@
@@ -906,42 +837,7 @@ index 1e89fd655..af3bae287 100644
    },
    "visual": {
      "title": "Visual",
-@@ -127,7 +131,9 @@
-     "cardAnimationStyleOptions": {
-       "webgl": "New",
-       "classic": "Classic"
--    }
-+    },
-+    "cardAnimationPreviewHintHover": "Hover to preview",
-+    "cardAnimationPreviewHintTap": "Tap to preview"
-   },
-   "flexLayout": {
-     "title": "Flex Layout",
-@@ -506,11 +512,23 @@
-     "apiKey": "API key",
-     "apiKeyPlaceholder": "Paste your API key",
-     "apiKeyOptional": "Optional for local servers",
-+    "apiKeyMissing": "Enter your API key again. Keys are not saved across reloads, and this provider is not used for AI seats or draft bots until you do.",
-     "apiKeyStorage": "Kept in memory for this browser session only. API keys are never written to disk and are excluded from backup export and cloud sync, so you will re-enter yours after a reload. An API key also requires an https:// endpoint unless the server is on localhost.",
-     "apiKeyGet": "Get a key",
-     "test": "Test connection",
-     "testing": "Testing…",
-     "testOk": "Connected.",
-+    "defaultPrompt": {
-+      "connected": "Connected. Use this as your default opponent?",
-+      "ready": "Use this provider as your default opponent?",
-+      "action": "Use as default",
-+      "badge": "Default opponent"
-+    },
-+    "defaultOpponent": {
-+      "label": "Default opponent",
-+      "hint": "AI opponents use this provider unless you pick a different one for a seat when setting up a match. This includes the opponent in draft matches.",
-+      "engine": "Built-in engine AI"
-+    },
-     "draftToggle": {
-       "label": "Use for draft bots",
-       "hint": "Bot seats in a draft pod pick with the model, using the format’s set context.",
-@@ -528,4 +546,4 @@
+@@ -542,4 +546,4 @@
        "oversized": "The endpoint returned far more data than a chat completion."
      }
    }
@@ -949,7 +845,7 @@ index 1e89fd655..af3bae287 100644
 +}
 \ No newline at end of file
 diff --git a/client/src/i18n/locales/es/settings.json b/client/src/i18n/locales/es/settings.json
-index 87c389616..bb38a120a 100644
+index aa1c3530a..bb38a120a 100644
 --- a/client/src/i18n/locales/es/settings.json
 +++ b/client/src/i18n/locales/es/settings.json
 @@ -29,6 +29,8 @@
@@ -972,42 +868,7 @@ index 87c389616..bb38a120a 100644
    },
    "visual": {
      "title": "Visual",
-@@ -127,7 +131,9 @@
-     "cardAnimationStyleOptions": {
-       "webgl": "Nuevas",
-       "classic": "Clásicas"
--    }
-+    },
-+    "cardAnimationPreviewHintHover": "Pasa el cursor para ver",
-+    "cardAnimationPreviewHintTap": "Toca para ver"
-   },
-   "flexLayout": {
-     "title": "Diseño flexible",
-@@ -506,11 +512,23 @@
-     "apiKey": "Clave de API",
-     "apiKeyPlaceholder": "Pega tu clave de API",
-     "apiKeyOptional": "Opcional para servidores locales",
-+    "apiKeyMissing": "Vuelve a introducir tu clave de API. Las claves no se conservan al recargar, y este proveedor no se usa para los asientos de IA ni para los bots del draft hasta que lo hagas.",
-     "apiKeyStorage": "Se mantiene en memoria solo durante esta sesión del navegador. Las claves de API nunca se escriben en disco y quedan excluidas de la copia de seguridad y de la sincronización en la nube, así que tendrás que volver a introducirla tras recargar. Además, una clave de API exige un endpoint https:// salvo que el servidor esté en localhost.",
-     "apiKeyGet": "Obtener una clave",
-     "test": "Probar conexión",
-     "testing": "Probando…",
-     "testOk": "Conectado.",
-+    "defaultPrompt": {
-+      "connected": "Conectado. ¿Usarlo como tu oponente predeterminado?",
-+      "ready": "¿Usar este proveedor como tu oponente predeterminado?",
-+      "action": "Usar como predeterminado",
-+      "badge": "Oponente predeterminado"
-+    },
-+    "defaultOpponent": {
-+      "label": "Oponente predeterminado",
-+      "hint": "Los oponentes de IA usan este proveedor salvo que elijas otro para un asiento al preparar una partida. Incluye al oponente de las partidas de draft.",
-+      "engine": "IA integrada del motor"
-+    },
-     "draftToggle": {
-       "label": "Usar para los bots del draft",
-       "hint": "Los asientos de bot de un draft eligen con el modelo, usando el contexto de sets del formato.",
-@@ -528,4 +546,4 @@
+@@ -542,4 +546,4 @@
        "oversized": "El endpoint devolvió muchos más datos de los que cabe esperar de una respuesta de chat."
      }
    }
@@ -1015,7 +876,7 @@ index 87c389616..bb38a120a 100644
 +}
 \ No newline at end of file
 diff --git a/client/src/i18n/locales/fr/settings.json b/client/src/i18n/locales/fr/settings.json
-index 3ba82dbb5..4c99fecf2 100644
+index 268dc1458..4c99fecf2 100644
 --- a/client/src/i18n/locales/fr/settings.json
 +++ b/client/src/i18n/locales/fr/settings.json
 @@ -29,6 +29,8 @@
@@ -1038,42 +899,7 @@ index 3ba82dbb5..4c99fecf2 100644
    },
    "visual": {
      "title": "Visuel",
-@@ -127,7 +131,9 @@
-     "cardAnimationStyleOptions": {
-       "webgl": "Nouvelles",
-       "classic": "Classiques"
--    }
-+    },
-+    "cardAnimationPreviewHintHover": "Survolez pour prévisualiser",
-+    "cardAnimationPreviewHintTap": "Touchez pour prévisualiser"
-   },
-   "flexLayout": {
-     "title": "Disposition flexible",
-@@ -506,11 +512,23 @@
-     "apiKey": "Clé d'API",
-     "apiKeyPlaceholder": "Collez votre clé d'API",
-     "apiKeyOptional": "Facultative pour un serveur local",
-+    "apiKeyMissing": "Saisissez à nouveau votre clé d'API. Les clés ne sont pas conservées après un rechargement, et ce fournisseur n'est utilisé ni pour les sièges IA ni pour les bots de draft tant que vous ne l'avez pas fait.",
-     "apiKeyStorage": "Conservée en mémoire pour cette session de navigation uniquement. Les clés d'API ne sont jamais écrites sur le disque et sont exclues de l'export de sauvegarde et de la synchronisation cloud : vous la ressaisirez après un rechargement. Une clé d'API impose aussi un point de terminaison https://, sauf si le serveur est sur localhost.",
-     "apiKeyGet": "Obtenir une clé",
-     "test": "Tester la connexion",
-     "testing": "Test en cours…",
-     "testOk": "Connecté.",
-+    "defaultPrompt": {
-+      "connected": "Connecté. L'utiliser comme adversaire par défaut ?",
-+      "ready": "Utiliser ce fournisseur comme adversaire par défaut ?",
-+      "action": "Utiliser par défaut",
-+      "badge": "Adversaire par défaut"
-+    },
-+    "defaultOpponent": {
-+      "label": "Adversaire par défaut",
-+      "hint": "Les adversaires IA utilisent ce fournisseur, sauf si vous en choisissez un autre pour un siège en préparant une partie. Cela inclut l'adversaire des parties de draft.",
-+      "engine": "IA intégrée du moteur"
-+    },
-     "draftToggle": {
-       "label": "Utiliser pour les bots de draft",
-       "hint": "Les sièges bots d'un draft choisissent avec le modèle, avec le contexte des éditions du format.",
-@@ -528,4 +546,4 @@
+@@ -542,4 +546,4 @@
        "oversized": "Le point de terminaison a renvoyé bien plus de données qu'une réponse de chat."
      }
    }
@@ -1081,7 +907,7 @@ index 3ba82dbb5..4c99fecf2 100644
 +}
 \ No newline at end of file
 diff --git a/client/src/i18n/locales/it/settings.json b/client/src/i18n/locales/it/settings.json
-index f12290726..27567b645 100644
+index 5670b3c27..27567b645 100644
 --- a/client/src/i18n/locales/it/settings.json
 +++ b/client/src/i18n/locales/it/settings.json
 @@ -29,6 +29,8 @@
@@ -1104,42 +930,7 @@ index f12290726..27567b645 100644
    },
    "visual": {
      "title": "Grafica",
-@@ -127,7 +131,9 @@
-     "cardAnimationStyleOptions": {
-       "webgl": "Nuove",
-       "classic": "Classiche"
--    }
-+    },
-+    "cardAnimationPreviewHintHover": "Passa il mouse per l'anteprima",
-+    "cardAnimationPreviewHintTap": "Tocca per l'anteprima"
-   },
-   "flexLayout": {
-     "title": "Layout flessibile",
-@@ -506,11 +512,23 @@
-     "apiKey": "Chiave API",
-     "apiKeyPlaceholder": "Incolla la tua chiave API",
-     "apiKeyOptional": "Facoltativa per i server locali",
-+    "apiKeyMissing": "Inserisci di nuovo la tua chiave API. Le chiavi non vengono conservate dopo un ricaricamento e questo provider non viene usato per i posti IA o i bot del draft finché non lo fai.",
-     "apiKeyStorage": "Conservata in memoria solo per questa sessione del browser. Le chiavi API non vengono mai scritte su disco e sono escluse dall'esportazione di backup e dalla sincronizzazione cloud: dopo un ricaricamento dovrai reinserirla. Una chiave API richiede inoltre un endpoint https://, a meno che il server non sia su localhost.",
-     "apiKeyGet": "Ottieni una chiave",
-     "test": "Prova connessione",
-     "testing": "Prova in corso…",
-     "testOk": "Connesso.",
-+    "defaultPrompt": {
-+      "connected": "Connesso. Usarlo come avversario predefinito?",
-+      "ready": "Usare questo provider come avversario predefinito?",
-+      "action": "Usa come predefinito",
-+      "badge": "Avversario predefinito"
-+    },
-+    "defaultOpponent": {
-+      "label": "Avversario predefinito",
-+      "hint": "Gli avversari IA usano questo provider, a meno che non ne scelga un altro per un posto durante la configurazione della partita. Vale anche per l'avversario delle partite di draft.",
-+      "engine": "IA integrata del motore"
-+    },
-     "draftToggle": {
-       "label": "Usa per i bot del draft",
-       "hint": "I posti bot di un draft scelgono con il modello, usando il contesto dei set del formato.",
-@@ -528,4 +546,4 @@
+@@ -542,4 +546,4 @@
        "oversized": "L'endpoint ha restituito molti più dati di una risposta di chat."
      }
    }
@@ -1147,7 +938,7 @@ index f12290726..27567b645 100644
 +}
 \ No newline at end of file
 diff --git a/client/src/i18n/locales/ja/settings.json b/client/src/i18n/locales/ja/settings.json
-index 0446066e9..1d0ba67d7 100644
+index 595e88ad8..1d0ba67d7 100644
 --- a/client/src/i18n/locales/ja/settings.json
 +++ b/client/src/i18n/locales/ja/settings.json
 @@ -29,6 +29,8 @@
@@ -1170,42 +961,7 @@ index 0446066e9..1d0ba67d7 100644
    },
    "visual": {
      "title": "表示",
-@@ -127,7 +131,9 @@
-     "cardAnimationStyleOptions": {
-       "webgl": "新スタイル",
-       "classic": "クラシック"
--    }
-+    },
-+    "cardAnimationPreviewHintHover": "ホバーでプレビュー",
-+    "cardAnimationPreviewHintTap": "タップでプレビュー"
-   },
-   "flexLayout": {
-     "title": "フレックスレイアウト",
-@@ -506,11 +512,23 @@
-     "apiKey": "APIキー",
-     "apiKeyPlaceholder": "APIキーを貼り付け",
-     "apiKeyOptional": "ローカルサーバーでは任意",
-+    "apiKeyMissing": "APIキーをもう一度入力してください。キーは再読み込み後に保持されず、入力するまでこのプロバイダーはAI席やドラフトボットに使用されません。",
-     "apiKeyStorage": "APIキーは、このブラウザーのセッション中のみメモリに保持されます。ディスクには保存されず、バックアップのエクスポートやクラウド同期にも含まれないため、再読み込み後は再入力が必要です。また、サーバーがlocalhostで動作している場合を除き、APIキーを使うにはhttps://のエンドポイントが必要です。",
-     "apiKeyGet": "キーを取得",
-     "test": "接続をテスト",
-     "testing": "テスト中…",
-     "testOk": "接続しました。",
-+    "defaultPrompt": {
-+      "connected": "接続しました。デフォルトの対戦相手として使用しますか？",
-+      "ready": "このプロバイダーをデフォルトの対戦相手として使用しますか？",
-+      "action": "デフォルトにする",
-+      "badge": "デフォルトの対戦相手"
-+    },
-+    "defaultOpponent": {
-+      "label": "デフォルトの対戦相手",
-+      "hint": "対戦のセットアップで席ごとに別のプロバイダーを選ばない限り、AI対戦相手はこのプロバイダーを使用します。ドラフト後の対戦相手にも適用されます。",
-+      "engine": "内蔵エンジンAI"
-+    },
-     "draftToggle": {
-       "label": "ドラフトのボットに使用",
-       "hint": "ドラフト・ポッドのボットが、フォーマットのセット情報を参照してモデルでピックします。",
-@@ -528,4 +546,4 @@
+@@ -542,4 +546,4 @@
        "oversized": "エンドポイントから、チャット応答としては大きすぎるデータが返されました。"
      }
    }
@@ -1213,7 +969,7 @@ index 0446066e9..1d0ba67d7 100644
 +}
 \ No newline at end of file
 diff --git a/client/src/i18n/locales/pl/settings.json b/client/src/i18n/locales/pl/settings.json
-index f36096d91..bf0b30e01 100644
+index a61dad8ff..bf0b30e01 100644
 --- a/client/src/i18n/locales/pl/settings.json
 +++ b/client/src/i18n/locales/pl/settings.json
 @@ -29,6 +29,8 @@
@@ -1236,42 +992,7 @@ index f36096d91..bf0b30e01 100644
    },
    "visual": {
      "title": "Grafika",
-@@ -127,7 +131,9 @@
-     "cardAnimationStyleOptions": {
-       "webgl": "Nowe",
-       "classic": "Klasyczne"
--    }
-+    },
-+    "cardAnimationPreviewHintHover": "Najedź, aby zobaczyć podgląd",
-+    "cardAnimationPreviewHintTap": "Dotknij, aby zobaczyć podgląd"
-   },
-   "flexLayout": {
-     "title": "Elastyczny układ",
-@@ -506,11 +512,23 @@
-     "apiKey": "Klucz API",
-     "apiKeyPlaceholder": "Wklej swój klucz API",
-     "apiKeyOptional": "Opcjonalny dla serwerów lokalnych",
-+    "apiKeyMissing": "Wpisz klucz API ponownie. Klucze nie są zachowywane po przeładowaniu, a ten dostawca nie jest używany dla miejsc AI ani botów w draftcie, dopóki tego nie zrobisz.",
-     "apiKeyStorage": "Przechowywany w pamięci tylko na czas tej sesji przeglądarki. Klucze API nigdy nie trafiają na dysk i są wyłączone z eksportu kopii zapasowej oraz synchronizacji w chmurze, więc po przeładowaniu trzeba go wpisać ponownie. Klucz API wymaga też endpointu https://, chyba że serwer działa na localhost.",
-     "apiKeyGet": "Zdobądź klucz",
-     "test": "Testuj połączenie",
-     "testing": "Testowanie…",
-     "testOk": "Połączono.",
-+    "defaultPrompt": {
-+      "connected": "Połączono. Użyć jako domyślnego przeciwnika?",
-+      "ready": "Użyć tego dostawcy jako domyślnego przeciwnika?",
-+      "action": "Użyj jako domyślnego",
-+      "badge": "Domyślny przeciwnik"
-+    },
-+    "defaultOpponent": {
-+      "label": "Domyślny przeciwnik",
-+      "hint": "Przeciwnicy AI używają tego dostawcy, chyba że przy konfiguracji meczu wybierzesz innego dla danego miejsca. Dotyczy to także przeciwnika w meczach po drafcie.",
-+      "engine": "Wbudowane AI silnika"
-+    },
-     "draftToggle": {
-       "label": "Użyj do botów w drafcie",
-       "hint": "Boty w drafcie wybierają kartę modelem, z kontekstem dodatków danego formatu.",
-@@ -528,4 +546,4 @@
+@@ -542,4 +546,4 @@
        "oversized": "Endpoint zwrócił znacznie więcej danych niż odpowiedź czatu."
      }
    }
@@ -1279,7 +1000,7 @@ index f36096d91..bf0b30e01 100644
 +}
 \ No newline at end of file
 diff --git a/client/src/i18n/locales/pt/settings.json b/client/src/i18n/locales/pt/settings.json
-index e150e312e..428944e95 100644
+index e0b472d21..428944e95 100644
 --- a/client/src/i18n/locales/pt/settings.json
 +++ b/client/src/i18n/locales/pt/settings.json
 @@ -29,6 +29,8 @@
@@ -1302,42 +1023,7 @@ index e150e312e..428944e95 100644
    },
    "visual": {
      "title": "Visual",
-@@ -127,7 +131,9 @@
-     "cardAnimationStyleOptions": {
-       "webgl": "Novas",
-       "classic": "Clássicas"
--    }
-+    },
-+    "cardAnimationPreviewHintHover": "Passe o cursor para pré-visualizar",
-+    "cardAnimationPreviewHintTap": "Toque para pré-visualizar"
-   },
-   "flexLayout": {
-     "title": "Layout flexível",
-@@ -506,11 +512,23 @@
-     "apiKey": "Chave de API",
-     "apiKeyPlaceholder": "Cola a tua chave de API",
-     "apiKeyOptional": "Opcional para servidores locais",
-+    "apiKeyMissing": "Introduz novamente a tua chave de API. As chaves não são guardadas após recarregar, e este fornecedor não é usado nos lugares de IA nem nos bots do draft até o fazeres.",
-     "apiKeyStorage": "Mantida em memória apenas nesta sessão do navegador. As chaves de API nunca são escritas em disco e ficam excluídas da exportação de cópia de segurança e da sincronização na nuvem, por isso terás de a introduzir novamente após recarregar. Uma chave de API exige também um endpoint https://, a menos que o servidor esteja em localhost.",
-     "apiKeyGet": "Obter uma chave",
-     "test": "Testar ligação",
-     "testing": "A testar…",
-     "testOk": "Ligado.",
-+    "defaultPrompt": {
-+      "connected": "Ligado. Usá-lo como oponente predefinido?",
-+      "ready": "Usar este fornecedor como oponente predefinido?",
-+      "action": "Usar como predefinido",
-+      "badge": "Oponente predefinido"
-+    },
-+    "defaultOpponent": {
-+      "label": "Oponente predefinido",
-+      "hint": "Os oponentes de IA usam este fornecedor, a menos que escolhas outro para um lugar ao preparar uma partida. Inclui o oponente das partidas de draft.",
-+      "engine": "IA integrada do motor"
-+    },
-     "draftToggle": {
-       "label": "Usar para os bots do draft",
-       "hint": "Os lugares de bot de um draft escolhem com o modelo, usando o contexto de colecções do formato.",
-@@ -528,4 +546,4 @@
+@@ -542,4 +546,4 @@
        "oversized": "O endpoint devolveu muitos mais dados do que uma resposta de chat."
      }
    }
@@ -2915,17 +2601,12 @@ index 000000000..a3d86f470
 +}
 diff --git a/client/src/i18n/locales/zhs/game.json b/client/src/i18n/locales/zhs/game.json
 new file mode 100644
-index 000000000..71583cc47
+index 000000000..cabebc3db
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/game.json
-@@ -0,0 +1,2645 @@
+@@ -0,0 +1,2647 @@
 +{
-+  "playerLatency": {
-+    "host": "Host",
-+    "waiting": "Waiting",
-+    "value": "{{ms}} ms",
-+    "description": "Round-trip latency to the host. A missing reply does not disconnect the game."
-+  },
++  "playerLatency": {"host":"Host","waiting":"Waiting","value":"{{ms}} ms","description":"Round-trip latency to the host. A missing reply does not disconnect the game."},
 +  "abilityBlock": {
 +    "badge": "Blocked",
 +    "cantBeActivated": "This ability can't be activated",
@@ -2936,6 +2617,9 @@ index 000000000..71583cc47
 +  "manaSourceSelection": {
 +    "title": "Choose a mana source",
 +    "description": "This mana ability requires sacrificing a permanent.",
++    "baseOutput_one": "Base output: {{count}} mana",
++    "baseOutput_other": "Base output: {{count}} mana",
++    "baseOutputVariable": "Base amount determined on activation",
 +    "sacrifice": "Sacrifice",
 +    "back": "Back to mana payment",
 +    "unknownSource": "Mana source"
@@ -5232,7 +4916,9 @@ index 000000000..71583cc47
 +    "accept": "Yes",
 +    "decline": "No",
 +    "sourceFallback": "Effect",
-+    "entryLabel": "{{source}} — {{decision}}"
++    "entryLabel": "{{source}} — {{decision}}",
++    "optionalTriggers": "Optional triggers ({{count, number}})",
++    "replacementChoices": "Replacement choices ({{count, number}})"
 +  },
 +  "optionalEffect": {
 +    "sourceFallback": "Effect",
@@ -5312,6 +4998,8 @@ index 000000000..71583cc47
 +    "confirm": "Confirm"
 +  },
 +  "replacement": {
++    "remember": "Remember this choice this game",
++    "savedChoice": "Replacement: {{choice}}",
 +    "eyebrow": "Resolution Order",
 +    "title": "Replacement Effects",
 +    "orderSubtitle": "These effects all change how this event happens. Drag to set the order they apply in — the last one applied is the one that takes effect (CR 616.1).",
@@ -7103,7 +6791,7 @@ index b60de5bf8..ce0df0080 100644
  }
  
 diff --git a/client/src/services/__tests__/scryfall.test.ts b/client/src/services/__tests__/scryfall.test.ts
-index cce6505f5..569250248 100644
+index cce6505f5..02b3c3e23 100644
 --- a/client/src/services/__tests__/scryfall.test.ts
 +++ b/client/src/services/__tests__/scryfall.test.ts
 @@ -12,6 +12,9 @@ import { tmpdir } from "node:os";
@@ -7116,7 +6804,28 @@ index cce6505f5..569250248 100644
  
  import type { PrintingEntry } from "../scryfall.ts";
  
-@@ -2007,3 +2010,526 @@ describe("localized card art", () => {
+@@ -109,6 +112,20 @@ function validPrintingEntry() {
+   };
+ }
+ 
++// Every URL assertion in this file is about the PATH a Scryfall URL is derived
++// into — the printing id, the size, the face, the locale prefix. Which ORIGIN
++// those paths hang off is a separate transport decision, and under Vitest `DEV`
++// is true, so the derived locale would otherwise build its relay prefix here and
++// every such assertion would have to spell that prefix out. Pin it off file-wide
++// and exercise the relay explicitly in its own block below.
++beforeEach(() => {
++  vi.stubEnv("DEV", false);
++});
++
++afterEach(() => {
++  vi.unstubAllEnvs();
++});
++
+ describe("local Scryfall data authorities", () => {
+   beforeEach(() => {
+     vi.restoreAllMocks();
+@@ -2007,3 +2024,586 @@ describe("localized card art", () => {
      expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal")).toBe(cardUrl(DE_ID));
    });
  });
@@ -7643,6 +7352,66 @@ index cce6505f5..569250248 100644
 +    expect(isDerivedArtLocale("en")).toBe(false);
 +  });
 +});
++
++/**
++ * The relay exists because the derived locale's CDN sends
++ * `access-control-allow-origin` twice on every response, which a browser rejects
++ * outright — so WebGL, which must upload an untainted image, could not use Chinese
++ * art at all. A SAME-ORIGIN image is exempt from the check, so the dev server
++ * relays the host and these tests pin the resulting origin.
++ *
++ * The PATH is deliberately identical across all three cases; only the origin
++ * moves. That is what makes the relay a transport detail rather than a second
++ * derivation, and it is why the assertions above can pin the CDN origin.
++ */
++describe("derived art relay", () => {
++  const EN_ID = "0dbac7ce-a6fa-466e-b6ba-173cf2dec98e";
++  const PATH = `zhs/normal/front/${EN_ID[0]}/${EN_ID[1]}/${EN_ID}.webp`;
++
++  const printing = (id: string): PrintingEntry => ({
++    id,
++    set: "mid",
++    set_name: "Innistrad: Midnight Hunt",
++    collector_number: "7",
++    released_at: "2021-09-24",
++    border_color: "black",
++    frame_effects: [],
++    full_art: false,
++    faces: [
++      {
++        small: `https://cards.scryfall.io/small/front/${id[0]}/${id[1]}/${id}.jpg`,
++        normal: `https://cards.scryfall.io/normal/front/${id[0]}/${id[1]}/${id}.jpg`,
++        art_crop: `https://cards.scryfall.io/art_crop/front/${id[0]}/${id[1]}/${id}.jpg`,
++      },
++    ],
++  });
++
++  const resolve = async () => {
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("zhs");
++    return mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal");
++  };
++
++  it("goes same-origin when the dev server serves the relay", async () => {
++    vi.stubEnv("DEV", true);
++    vi.stubEnv("VITE_ART_PROXY", "");
++    expect(await resolve()).toBe(`/card-art/${PATH}`);
++  });
++
++  it("goes same-origin in a production build that opts in", async () => {
++    vi.stubEnv("DEV", false);
++    vi.stubEnv("VITE_ART_PROXY", "1");
++    expect(await resolve()).toBe(`/card-art/${PATH}`);
++  });
++
++  it("keeps the CDN's own origin where no relay is served", async () => {
++    // The production default, and today's behaviour: a build with no relay must
++    // not emit a URL that cannot resolve.
++    vi.stubEnv("DEV", false);
++    vi.stubEnv("VITE_ART_PROXY", "");
++    expect(await resolve()).toBe(`https://images.mtgch.com/${PATH}`);
++  });
++});
 diff --git a/client/src/services/cardArtLocale.ts b/client/src/services/cardArtLocale.ts
 new file mode 100644
 index 000000000..0f801f10f
@@ -7847,7 +7616,7 @@ index d73973a2c..ba0b989ab 100644
  
  const cardLocalePromises = new Map<string, Promise<Map<string, LocalizedFace>>>();
 diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
-index 2e980b53f..22db17be0 100644
+index 2e980b53f..03caf17b7 100644
 --- a/client/src/services/scryfall.ts
 +++ b/client/src/services/scryfall.ts
 @@ -1,5 +1,6 @@
@@ -7912,7 +7681,7 @@ index 2e980b53f..22db17be0 100644
   */
  function splitSizedImageUrl(
    url: string | null | undefined,
-@@ -593,11 +621,111 @@ export function deriveImageUrl(url: string, size: ImageSize): string {
+@@ -593,11 +621,147 @@ export function deriveImageUrl(url: string, size: ImageSize): string {
    return `${parsed.scheme}://${segments.join("/")}`;
  }
  
@@ -7945,6 +7714,42 @@ index 2e980b53f..22db17be0 100644
 +
 +/** The single host a derived art locale's CDN lives on. */
 +const DERIVED_ART_HOST = "images.mtgch.com";
++
++/**
++ * Same-origin path the dev server relays `DERIVED_ART_HOST` through.
++ *
++ * Keep in step with the `/card-art` entry in `vite.config.ts`.
++ */
++const DERIVED_ART_PROXY_PATH = "/card-art";
++
++/**
++ * The origin a derived locale's art URLs are built on.
++ *
++ * That CDN answers EVERY response with `access-control-allow-origin` **twice** —
++ * two of its own layers each add the header, both emitting `*`, measured on every
++ * path including the language-neutral `/sf/` one. A browser rejects a duplicated
++ * CORS header outright, so no `crossOrigin="anonymous"` request to that host can
++ * succeed, and WebGL — which must upload an UNTAINTED image — is therefore unable
++ * to use the Chinese art at all. Ordinary `<img>` display is untouched because it
++ * never asks for CORS, which is exactly why only the cast animation showed English
++ * art while the hand and battlefield showed Chinese.
++ *
++ * The header is the CDN's to fix and it is not ours. What we CAN do is stop making
++ * a cross-origin request: the dev server relays the host at a same-origin path, and
++ * a SAME-ORIGIN image is exempt from the CORS check entirely. The relay is Node, so
++ * the duplicate header never reaches the browser — and a same-origin image does not
++ * taint the canvas, so the WebGL path is satisfied too.
++ *
++ * Gated on `DEV` so a production build served without that relay keeps the direct
++ * host — today's behaviour, rather than a URL that cannot resolve. A deployment
++ * that adds the same relay opts in with `VITE_ART_PROXY=1`.
++ */
++function derivedArtBase(): string {
++  if (import.meta.env.DEV || import.meta.env.VITE_ART_PROXY === "1") {
++    return DERIVED_ART_PROXY_PATH;
++  }
++  return `https://${DERIVED_ART_HOST}`;
++}
 +
 +export interface DerivedArtSource {
 +  /** URL for a five-segment Scryfall image URL, or null when this rung does not exist. */
@@ -7991,7 +7796,7 @@ index 2e980b53f..22db17be0 100644
 +  const dot = filename.indexOf(".");
 +  if (dot < 0) return null;
 +  const printingId = filename.slice(0, dot);
-+  const base = `https://${DERIVED_ART_HOST}`;
++  const base = derivedArtBase();
 +  const path = `${size}/${face}/${shardA}/${shardB}/${printingId}.webp`;
 +  // Written out rather than `lang` interpolated straight in: the prefix is a
 +  // third-party path contract, and spelling both keeps them greppable together.
@@ -8024,7 +7829,7 @@ index 2e980b53f..22db17be0 100644
   * Reusing `splitSizedImageUrl` is load-bearing, not stylistic. It rejects
   * `CARD_BACK_URL` (four path segments) and the `errors.scryfall.com/soon.jpg`
   * placeholder (one) — and the placeholder MUST come back byte-identical or
-@@ -606,11 +734,15 @@ export function deriveImageUrl(url: string, size: ImageSize): string {
+@@ -606,11 +770,15 @@ export function deriveImageUrl(url: string, size: ImageSize): string {
   * merely found a UUID in the path would rewrite both.
   *
   * The trailing `?<timestamp>` is dropped: it is the *English* printing's
@@ -8042,7 +7847,7 @@ index 2e980b53f..22db17be0 100644
    const parsed = splitSizedImageUrl(url);
    if (!parsed) return url;
    // segments: [host, size, face, id[0], id[1], "<id>.jpg?<timestamp>"]
-@@ -631,6 +763,34 @@ function localizeImageUrl(url: string): string {
+@@ -631,6 +799,34 @@ function localizeImageUrl(url: string): string {
    return localizedUrl ?? url;
  }
  
@@ -8077,7 +7882,7 @@ index 2e980b53f..22db17be0 100644
  /**
   * Resolve one stored local face to a URL for the requested size.
   *
-@@ -666,6 +826,14 @@ export interface CardImageAsset {
+@@ -666,6 +862,14 @@ export interface CardImageAsset {
    isRotated: boolean;
    source: CardImageSource;
    rungs?: ImageRungs;
@@ -8092,7 +7897,7 @@ index 2e980b53f..22db17be0 100644
    semantic: {
      oracleId?: string;
      englishPrintingId?: string;
-@@ -681,6 +849,34 @@ function remoteImageSource(src: string, size: ImageSize): { source: CardImageSou
+@@ -681,6 +885,34 @@ function remoteImageSource(src: string, size: ImageSize): { source: CardImageSou
    return { source: { kind: "remote", src, rungs }, rungs };
  }
  
@@ -8127,7 +7932,7 @@ index 2e980b53f..22db17be0 100644
  function isSidewaysLayout(layout: string | undefined): boolean {
    return layout === "split";
  }
-@@ -1039,12 +1235,29 @@ function resolveImageAsset(
+@@ -1039,12 +1271,29 @@ function resolveImageAsset(
    size: ImageSize,
    diagnosticName: string,
  ): CardImageAsset {
@@ -8157,7 +7962,7 @@ index 2e980b53f..22db17be0 100644
      semantic: {
        oracleId: entry.oracle_id.toLowerCase(),
        faceIndex,
-@@ -1057,6 +1270,11 @@ function isPlaceholderImageUrl(url: string): boolean {
+@@ -1057,6 +1306,11 @@ function isPlaceholderImageUrl(url: string): boolean {
    return url === "https://errors.scryfall.com/soon.jpg";
  }
  
@@ -8169,7 +7974,7 @@ index 2e980b53f..22db17be0 100644
  function resolvePrintingFallback(
    oracleId: string,
    faceIndex: number,
-@@ -1071,6 +1289,17 @@ function resolvePrintingFallback(
+@@ -1071,6 +1325,17 @@ function resolvePrintingFallback(
    return null;
  }
  
@@ -8187,7 +7992,7 @@ index 2e980b53f..22db17be0 100644
  async function resolveImageAssetWithPrintingFallback(
    entry: ScryfallDataEntry,
    faceIndex: number,
-@@ -1078,6 +1307,7 @@ async function resolveImageAssetWithPrintingFallback(
+@@ -1078,6 +1343,7 @@ async function resolveImageAssetWithPrintingFallback(
    diagnosticName: string,
  ): Promise<CardImageAsset> {
    const asset = resolveImageAsset(entry, faceIndex, size, diagnosticName);
@@ -8195,7 +8000,7 @@ index 2e980b53f..22db17be0 100644
    if (!isPlaceholderImageUrl(asset.src)) return asset;
  
    await loadPrintingsData();
-@@ -1220,6 +1450,15 @@ export async function fetchTokenImageUrl(
+@@ -1220,6 +1486,15 @@ export async function fetchTokenImageUrl(
  }
  
  export interface TokenImageAssetByRef {
@@ -8211,7 +8016,7 @@ index 2e980b53f..22db17be0 100644
    src: string;
    faceIndex: number;
  }
-@@ -1236,7 +1475,14 @@ export async function fetchTokenImageAssetByRef(
+@@ -1236,7 +1511,14 @@ export async function fetchTokenImageAssetByRef(
      const faceIndex = ref.face_name
        ? Math.max(0, idEntry.face_names.indexOf(ref.face_name.toLowerCase()))
        : 0;
@@ -8227,7 +8032,7 @@ index 2e980b53f..22db17be0 100644
    }
  
    if (ref.scryfall_oracle_id) {
-@@ -1246,7 +1492,14 @@ export async function fetchTokenImageAssetByRef(
+@@ -1246,7 +1528,14 @@ export async function fetchTokenImageAssetByRef(
        const faceIndex = ref.face_name
          ? Math.max(0, oracleEntry.face_names.indexOf(ref.face_name.toLowerCase()))
          : 0;
@@ -8484,6 +8289,31 @@ index e6634f101..e1ba692e4 100644
      },
    ),
  );
+diff --git a/client/vite.config.ts b/client/vite.config.ts
+index 37a05befd..5d9a699dc 100644
+--- a/client/vite.config.ts
++++ b/client/vite.config.ts
+@@ -535,6 +535,20 @@ export default defineConfig(({ mode }) => {
+         target: process.env.VITE_IMPORT_DECK_PROXY ?? "http://localhost:8787",
+         changeOrigin: true,
+       },
++      // Relay the derived-locale art CDN so the browser makes a SAME-ORIGIN
++      // request for Chinese card art. That host sends
++      // `access-control-allow-origin` twice on every response, which a browser
++      // rejects outright — so a `crossOrigin="anonymous"` request for it can
++      // never succeed and WebGL (which must upload an untainted image) could not
++      // use Chinese art at all. A same-origin image is exempt from the CORS check,
++      // and Node does not care what headers the far side duplicates.
++      //
++      // Keep in step with `DERIVED_ART_PROXY_PATH` in `src/services/scryfall.ts`.
++      "/card-art": {
++        target: `https://${process.env.VITE_ART_CDN_HOST ?? "images.mtgch.com"}`,
++        changeOrigin: true,
++        rewrite: (path) => path.replace(/^\/card-art/, ""),
++      },
+     },
+   },
+   build: {
 diff --git a/scripts/gen-zhs-card-text.mjs b/scripts/gen-zhs-card-text.mjs
 new file mode 100644
 index 000000000..51f68a890

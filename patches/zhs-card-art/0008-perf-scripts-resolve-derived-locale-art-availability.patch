@@ -1,7 +1,7 @@
 From 542bce5516e5687441f1203425d6e31d2b703298 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 13:17:59 +0800
-Subject: [PATCH 8/9] perf(scripts): resolve derived-locale art availability
+Subject: [PATCH 08/10] perf(scripts): resolve derived-locale art availability
  from the index API
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

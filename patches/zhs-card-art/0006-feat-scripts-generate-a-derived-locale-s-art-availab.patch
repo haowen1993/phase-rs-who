@@ -1,7 +1,7 @@
 From 18a974779537a7d4bfabd9f788c0ff38396075d2 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 00:48:52 +0800
-Subject: [PATCH 6/9] feat(scripts): generate a derived locale's
+Subject: [PATCH 06/10] feat(scripts): generate a derived locale's
  art-availability sidecar
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

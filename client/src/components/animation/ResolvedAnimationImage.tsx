@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { GameObject, TokenImageRef } from "../../adapter/types.ts";
 import { useCardImage } from "../../hooks/useCardImage.ts";
 import { objectImageProps } from "../../services/cardImageLookup.ts";
+import { supportsAnonymousCors } from "../../services/scryfall.ts";
 import type { TokenSearchFilters } from "../../services/scryfall.ts";
 
 export interface AnimationImageSnapshot {
@@ -86,9 +87,19 @@ export function ResolvedAnimationImage({
   if (!src) return fallback;
 
   const capturedSrc = src;
+  // `crossOrigin` is dropped for a host whose headers cannot satisfy a CORS
+  // check (see `supportsAnonymousCors`). Callers pass it because these layers
+  // read pixels back out of a canvas, which needs a CORS-clean image — but that
+  // requirement must not be allowed to fail the load itself. Without the
+  // attribute the browser fetches in no-cors mode, the art displays, and only
+  // the canvas read is lost.
+  const { crossOrigin, ...restAttributes } = imageAttributes;
+  const corsAttributes =
+    crossOrigin && supportsAnonymousCors(capturedSrc) ? { crossOrigin } : {};
   return (
     <img
-      {...imageAttributes}
+      {...restAttributes}
+      {...corsAttributes}
       src={capturedSrc}
       alt={alt}
       onLoad={(event) => {

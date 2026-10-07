@@ -648,8 +648,57 @@ export function deriveImageUrl(url: string, size: ImageSize): string {
 /** The Scryfall CDN host every stored art URL is built on. */
 const SCRYFALL_IMAGE_HOST = "cards.scryfall.io";
 
+/**
+ * The domain whose hosts answer a CORS request correctly.
+ *
+ * A suffix rather than one hostname because Scryfall serves card art from
+ * `cards.` and card backs from `backs.`; both send `access-control-allow-origin`
+ * exactly once. Measured, not assumed.
+ */
+const CORS_CAPABLE_IMAGE_DOMAIN = "scryfall.io";
+
 /** The single host a derived art locale's CDN lives on. */
 const DERIVED_ART_HOST = "images.mtgch.com";
+
+/**
+ * Whether a canvas layer may request `url` with `crossOrigin="anonymous"`.
+ *
+ * Every other consumer of a card image is a plain `<img>`, which loads in
+ * no-cors mode and ignores CORS headers entirely. The canvas layers
+ * (`CardVfxLayer`, `AnimationOverlay`) are the exception: reading pixels back out
+ * of a canvas requires the image to have been CORS-clean, so they set
+ * `crossOrigin="anonymous"` — which PROMOTES the request into cors mode, where a
+ * host without usable headers is refused outright.
+ *
+ * That asymmetry is what made Chinese art vanish rather than degrade. Measured
+ * on the derived locale's CDN (`images.mtgch.com/zhs/…`):
+ *
+ *     access-control-allow-origin: *
+ *     access-control-allow-origin: *
+ *
+ * The header is sent twice. A duplicate is a hard failure, not a "first wins":
+ * the browser rejects the response with "the header contains multiple values,
+ * but only one is allowed" — and a no-cors `<img>` would have loaded it happily.
+ * So an unconditional `crossOrigin` turned a working image into a failed one, on
+ * every card whose art that host serves.
+ *
+ * Scryfall's own CDN sends the header once and is unaffected, which is why only
+ * the localized rungs broke.
+ *
+ * Returning false here costs the card its canvas animation and keeps its art.
+ * The reverse trades art for an effect, which is not a trade this app should
+ * ever make silently.
+ */
+export function supportsAnonymousCors(url: string): boolean {
+  try {
+    const { hostname } = new URL(url, "https://placeholder.invalid");
+    return hostname === CORS_CAPABLE_IMAGE_DOMAIN
+      || hostname.endsWith(`.${CORS_CAPABLE_IMAGE_DOMAIN}`);
+  } catch {
+    // A URL this cannot parse is not one to hand a CORS-mode request.
+    return false;
+  }
+}
 
 export interface DerivedArtSource {
   /** URL for a five-segment Scryfall image URL, or null when this rung does not exist. */

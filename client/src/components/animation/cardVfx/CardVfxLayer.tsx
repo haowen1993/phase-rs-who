@@ -21,6 +21,7 @@ import type { Texture } from "three";
 import type { ObjectId } from "../../../adapter/types.ts";
 import { useCardBackImage } from "../../../hooks/useCardImage.ts";
 import type { CardImageSource } from "../../../services/visualPacks/types.ts";
+import { supportsAnonymousCors } from "../../../services/scryfall.ts";
 import { useAnimationStore } from "../../../stores/animationStore.ts";
 import { useGameStore } from "../../../stores/gameStore.ts";
 import { usePreferencesStore } from "../../../stores/preferencesStore.ts";
@@ -968,7 +969,10 @@ function CardBackLoader({ onSettled }: { onSettled: (image: HTMLImageElement | n
     <img
       src={corsOnlySrc(source)}
       alt=""
-      crossOrigin="anonymous"
+      // Dropped where the host cannot pass a CORS check — see
+      // `supportsAnonymousCors`. The card back must render even when the canvas
+      // read is impossible.
+      {...(supportsAnonymousCors(source.src) ? { crossOrigin: "anonymous" as const } : {})}
       onLoad={(event) => onSettled(event.currentTarget)}
       // The ladder advances on the source's own URL, not the rewritten one.
       onError={() => advanceFailedSource?.(source.src)}

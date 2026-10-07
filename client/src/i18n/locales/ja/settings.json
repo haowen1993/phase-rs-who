@@ -73,7 +73,9 @@
     "logDockSideOptions": {
       "left": "左",
       "right": "右"
-    }
+    },
+    "cardTextLanguage": "カードテキストの言語",
+    "cardTextLanguageAuto": "インターフェースに合わせる"
   },
   "visual": {
     "title": "表示",

@@ -73,7 +73,9 @@
     "logDockSideOptions": {
       "left": "Esquerda",
       "right": "Direita"
-    }
+    },
+    "cardTextLanguage": "Idioma do texto das cartas",
+    "cardTextLanguageAuto": "Seguir a interface"
   },
   "visual": {
     "title": "Visual",

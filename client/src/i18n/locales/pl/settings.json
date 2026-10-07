@@ -73,7 +73,9 @@
     "logDockSideOptions": {
       "left": "Lewo",
       "right": "Prawo"
-    }
+    },
+    "cardTextLanguage": "Język tekstu kart",
+    "cardTextLanguageAuto": "Zgodnie z interfejsem"
   },
   "visual": {
     "title": "Grafika",

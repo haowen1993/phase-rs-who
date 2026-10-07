@@ -1,4 +1,4 @@
-From 30fa479a3d9c6577c0ea3428abf0497d0fa7a177 Mon Sep 17 00:00:00 2001
+From 44510a7a8dd31a2d1e793a318882cbf2ce3b7f1c Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 16:20:29 +0800
 Subject: [PATCH 11/11] chore(art): drop the availability table, its
@@ -16,17 +16,90 @@ That is the concrete benefit of the rewrite: the fork no longer maintains a
 per-printing table for any locale, and a fresh build no longer spends ~6 minutes
 producing one.
 ---
+ .../src/services/__tests__/scryfall.test.ts   |  27 +-
+ client/src/services/scryfall.ts               |  19 ++
  client/src/vite-env.d.ts                      |   1 -
  client/vite.config.ts                         |  10 -
  client/vitest.config.ts                       |   1 -
  scripts/gen-derived-art-availability.sh       | 156 ----------
  scripts/lib/fetch-index-art-availability.py   | 279 ------------------
  scripts/lib/probe-derived-art-availability.py | 136 ---------
- 6 files changed, 583 deletions(-)
+ 8 files changed, 41 insertions(+), 588 deletions(-)
  delete mode 100755 scripts/gen-derived-art-availability.sh
  delete mode 100644 scripts/lib/fetch-index-art-availability.py
  delete mode 100755 scripts/lib/probe-derived-art-availability.py
 
+diff --git a/client/src/services/__tests__/scryfall.test.ts b/client/src/services/__tests__/scryfall.test.ts
+index ebe5958598..5692502486 100644
+--- a/client/src/services/__tests__/scryfall.test.ts
++++ b/client/src/services/__tests__/scryfall.test.ts
+@@ -2098,14 +2098,31 @@ describe("derived card art locales", () => {
+     expect(mod.resolvePrintingImageUrl(printing(EN_ID), 1, "normal")).toBe(derivedUrl(EN_ID, "zhs", "normal", "back"));
+   });
+ 
+-  it("leaves art crops on Scryfall", async () => {
++  it("sends art crops to the language-neutral prefix", async () => {
+     const mod = await loadScryfallModule();
+     await mod.loadLocaleArt("zhs");
+ 
+-    // An art crop is the illustration alone and carries no language; the stored
+-    // crop URL is also the one the browser already cached, so moving it to a
+-    // second host would re-download the identical picture to gain nothing.
+-    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "art_crop")).toBe(scryfallUrl(EN_ID, "art_crop"));
++    // An art crop is the illustration alone and carries no language, and this
++    // host serves no localized crop at all (measured 404). It therefore goes to
++    // the SAME printing on the language-neutral prefix rather than to the
++    // localized one, which would spend a guaranteed 404 on every hover preview.
++    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "art_crop")).toBe(
++      derivedUrl(EN_ID, "sf", "art_crop"),
++    );
++  });
++
++  it("rewrites a printing the locale has no art for, and keeps its id", async () => {
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("zhs");
++
++    // The rewrite is UNCONDITIONAL: it does not consult whether this printing has
++    // localized art, because asking that question needs a measured table and an
++    // answer two callers can disagree about. The CDN's 404 picks the rung, so the
++    // printing id must survive the rewrite unchanged.
++    const printingId = "11111111-2222-3333-4444-555555555555";
++    expect(mod.resolvePrintingImageUrl(printing(printingId), 0, "normal")).toBe(
++      derivedUrl(printingId, "zhs"),
++    );
+   });
+ 
+   it("drops the English cache-buster, which names no object on that host", async () => {
+diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
+index 0d7619e748..22db17be0f 100644
+--- a/client/src/services/scryfall.ts
++++ b/client/src/services/scryfall.ts
+@@ -1270,6 +1270,25 @@ function isPlaceholderImageUrl(url: string): boolean {
+   return url === "https://errors.scryfall.com/soon.jpg";
+ }
+ 
++/** The first printing of `oracleId` that yields a usable image, or null.
++ *
++ * The last resort behind `isPlaceholderImageUrl`: Scryfall names a printing whose
++ * image it does not serve, so this walks the card's printings for one that does.
++ */
++function resolvePrintingFallback(
++  oracleId: string,
++  faceIndex: number,
++  size: ImageSize,
++): { id: string; url: string } | null {
++  const printings = printingsDataResolved?.[oracleId.toLowerCase()] ?? [];
++  for (const printing of printings) {
++    if (printing.set === "plst") continue;
++    const url = resolvePrintingImageUrl(printing, faceIndex, size);
++    if (url && !isPlaceholderImageUrl(url)) return { id: printing.id, url };
++  }
++  return null;
++}
++
+ /**
+  * Resolve a card's image, falling back to another printing when the preferred
+  * one has no art at all.
 diff --git a/client/src/vite-env.d.ts b/client/src/vite-env.d.ts
 index 8bef21faad..cc7d856890 100644
 --- a/client/src/vite-env.d.ts

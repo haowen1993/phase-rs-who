@@ -381,10 +381,6 @@ export function isLocaleArtReady(lang: string): boolean {
  */
 export function loadLocaleArt(lang: string): Promise<Map<string, LocalizedArtEntry>> {
   desiredArtLang = lang;
-  // A locale's availability set is disjoint from another's, so a remembered
-  // canonical printing would pin every card to a printing the new locale may not
-  // have. Clear before anything can re-resolve.
-  clearCanonicalPrintings();
   if (lang === "en") {
     localeArtResolved = null;
     return Promise.resolve(new Map<string, LocalizedArtEntry>());
@@ -394,10 +390,8 @@ export function loadLocaleArt(lang: string): Promise<Map<string, LocalizedArtEnt
     localeArtResolved = { lang, map };
     // The availability set is per locale and may have been resolved for a
     // different one; drop it so the next lookup re-reads.
-    if (artAvailabilityPromise) {
-      artAvailability = null;
-      artAvailabilityPromise = null;
-    }
+    // The availability table is gone: a derived locale rewrites unconditionally
+    // and lets the CDN 404 drive the ladder, so there is nothing to invalidate.
     return Promise.resolve(map);
   }
   let promise = localeArtPromises.get(lang);
@@ -673,15 +667,20 @@ export interface DerivedArtSource {
  * image — the card back, the `errors.scryfall.com` placeholder, a test mock —
  * must come back untouched rather than be rewritten into another host's path.
  *
- * **`art_crop` returns null, i.e. the crop is never rewritten.** An art crop is
- * the illustration alone, so it carries no language; and unlike the face sizes,
- * the crop URLs in `scryfall-data.json` / `scryfall-printings.json` are stored
- * verbatim from Scryfall *with* their `?<timestamp>`, so they are the URLs the
- * browser already has cached. Redirecting them to a second host would re-download
- * the identical picture at the identical size, on every hover preview, to gain
- * nothing. (That host does not serve `/zhs/art_crop` at all; the reference
- * project's own `sf/art_crop` rung exists only because it must rewrite, having
- * no way to leave a URL alone once it has claimed the element.)
+ * **The rewrite is UNCONDITIONAL and keeps the SAME printing id.** The CDN
+ * localizes community art under the English printing's id, so a card's Chinese
+ * image is the same id on another host, and `art_crop` — the illustration alone,
+ * which carries no language — is the same id on that host's language-neutral
+ * prefix.
+ *
+ * That is the whole design, and it is deliberately not "look up which printings
+ * have Chinese art". Asking the question requires an answer up front, the answer
+ * is not knowable without either a ~1.6 MB generated table or a probe per
+ * printing, and — the reason this was rewritten — an answer that has to be
+ * *chosen* per caller is an answer two callers can disagree about. Deciding
+ * nothing and letting the CDN's own 404 drive the ladder (see `fallback`) makes
+ * a card's identity the same for every zone by construction, and drops the table
+ * and the probe entirely.
  *
  * The trailing `?<timestamp>` is dropped, matching `localizeImageUrl`: it is the
  * English printing's cache-buster and names an object this host does not have.
@@ -693,19 +692,23 @@ function derivedArtSource(url: string, lang: DerivedArtLocale): DerivedArtSource
   // Only the Scryfall CDN carries the printing id in the shape this derivation
   // reads. A URL already on another host keeps its own identity.
   if (host !== SCRYFALL_IMAGE_HOST) return null;
-  // Language-neutral, and already cached under its Scryfall URL — see above.
-  if (size === "art_crop") return null;
   // A UUID contains no `.`, so the first dot always ends the id.
   const dot = filename.indexOf(".");
   if (dot < 0) return null;
   const printingId = filename.slice(0, dot);
-  // Written out rather than `lang` interpolated straight in: the prefix is a
-  // third-party path contract, and spelling both keeps them greppable together.
-  const zhPrefix = lang === "zhs" ? "zhs" : "sf";
   const base = `https://${DERIVED_ART_HOST}`;
   const path = `${size}/${face}/${shardA}/${shardB}/${printingId}.webp`;
+  // Written out rather than `lang` interpolated straight in: the prefix is a
+  // third-party path contract, and spelling both keeps them greppable together.
+  //
+  // An art crop goes to the language-neutral prefix directly rather than to the
+  // locale's: the crop is the illustration alone, and this host serves no
+  // `zhs/art_crop` at all (measured 404 — its crop sizes live under `sf/`, at the
+  // same 626x457 the Scryfall crop uses, so the framing does not change). Sending
+  // it to `zhs` first would spend a guaranteed 404 on every hover preview.
+  const primaryPrefix = size === "art_crop" ? "sf" : lang === "zhs" ? "zhs" : "sf";
   return {
-    url: `${base}/${zhPrefix}/${path}`,
+    url: `${base}/${primaryPrefix}/${path}`,
     fallback: `${base}/sf/${path}`,
   };
 }
@@ -1268,147 +1271,16 @@ function isPlaceholderImageUrl(url: string): boolean {
 }
 
 /**
- * Printings the active derived locale actually has art for, or null when this
- * locale has no measured availability (every mapped locale, and `en`).
+ * Resolve a card's image, falling back to another printing when the preferred
+ * one has no art at all.
  *
- * Loaded from `scryfall-images.zhs-available.json`, which is generated by
- * probing that locale's CDN once per printing. It cannot be derived: the CDN
- * localizes community art under the ENGLISH printing's id, so no Scryfall field
- * records it, and the split inside one set is arbitrary — WHO #318 of a card has
- * Chinese art while #528, #909 and #1119 of the same card do not.
+ * This is now ONLY the placeholder case: the Scryfall data names a printing whose
+ * image Scryfall itself does not serve (`errors.scryfall.com/soon.jpg`) while
+ * another printing of the same card does. A derived locale no longer reaches
+ * here — it rewrites the printing it was handed and lets the CDN's 404 pick the
+ * rung (see `derivedArtSource`), which needs no table and cannot disagree with
+ * itself.
  */
-let artAvailability: Set<string> | null = null;
-let artAvailabilityPromise: Promise<Set<string> | null> | null = null;
-
-function loadArtAvailability(): Promise<Set<string> | null> {
-  if (!isDerivedArtLocale(desiredArtLang)) return Promise.resolve(null);
-  if (!artAvailabilityPromise) {
-    const lang = desiredArtLang;
-    artAvailabilityPromise = (async () => {
-      const resp = await fetch(
-        __SCRYFALL_IMAGES_AVAILABILITY_URL_TEMPLATE__.replace("{lng}", lang),
-      );
-      if (!resp.ok) return null;
-      const body: unknown = await resp.json();
-      const ids = (body as { ids?: unknown })?.ids;
-      if (!Array.isArray(ids)) return null;
-      return new Set(ids.filter((id): id is string => typeof id === "string"));
-    })()
-      .catch(() => null)
-      .then((set) => {
-        // Out-of-order guard, same shape as `loadLocaleArt`'s: a load for a
-        // locale the user has already left must not install itself.
-        if (desiredArtLang === lang) artAvailability = set;
-        return set;
-      });
-  }
-  return artAvailabilityPromise;
-}
-
-/** The printing id embedded in a stored card-image URL, or null. */
-function printingIdOf(url: string): string | null {
-  const parsed = splitSizedImageUrl(url);
-  if (!parsed) return null;
-  const filename = parsed.segments[5];
-  // A UUID contains no `.`, so the first dot always ends the id.
-  const dot = filename.indexOf(".");
-  return dot < 0 ? null : filename.slice(0, dot).toLowerCase();
-}
-
-/** The first printing of `oracleId` this locale has art for, or null. */
-function firstAvailablePrinting(
-  oracleId: string,
-  faceIndex: number,
-  size: ImageSize,
-): { id: string; url: string } | null {
-  if (!artAvailability) return null;
-  const printings = printingsDataResolved?.[oracleId.toLowerCase()] ?? [];
-  for (const printing of printings) {
-    if (printing.set === "plst") continue;
-    if (!artAvailability.has(printing.id.toLowerCase())) continue;
-    const url = resolvePrintingImageUrl(printing, faceIndex, size);
-    if (url && !isPlaceholderImageUrl(url)) return { id: printing.id, url };
-  }
-  return null;
-}
-
-/**
- * The ONE printing this locale renders a given card as, for every zone, for the
- * whole session.
- *
- * Without this, each entry point picked for itself — and they disagree, because
- * they resolve at different moments against state that is loaded lazily
- * (`artAvailability` and the printings map are both fetched, and
- * `firstAvailablePrinting` returns null until the first arrives). The player sees
- * one card as two: the hand rendered Doctor Who's `2x2 #454` while the stack
- * rendered `2x2 #123`, same spell, same frame.
- *
- * Cached by `oracleId` and cleared whenever the art locale changes (a locale's
- * availability set is disjoint from another's, so a remembered printing would pin
- * every card to whatever the previous locale happened to have). Cards are
- * canonicalized, not "preferred only when the stored printing is missing", so
- * there is exactly one answer per card rather than one per entry point.
- *
- * A null result means "no printing in this locale" and is cached too: that is a
- * property of the locale, not of who asked.
- */
-const canonicalPrintingByOracle = new Map<string, string | null>();
-
-/** Drop every remembered choice. Called when the active art locale changes. */
-function clearCanonicalPrintings(): void {
-  canonicalPrintingByOracle.clear();
-}
-
-async function canonicalPrintingIdFor(oracleId: string): Promise<string | null> {
-  const key = oracleId.toLowerCase();
-  if (canonicalPrintingByOracle.has(key)) return canonicalPrintingByOracle.get(key) ?? null;
-  await loadArtAvailability();
-  await loadPrintingsData();
-  // `art_crop` only selects; the caller re-resolves at its own size, so the size
-  // passed here never reaches the returned id.
-  const preferred = firstAvailablePrinting(key, 0, "art_crop");
-  const chosen = preferred?.id.toLowerCase() ?? null;
-  canonicalPrintingByOracle.set(key, chosen);
-  return chosen;
-}
-
-/** Re-address an already-resolved asset onto the canonical printing, if both the
- *  canonical choice and a usable URL for this face and size exist. */
-function applyCanonicalPrinting(
-  asset: CardImageAsset,
-  faceIndex: number,
-  size: ImageSize,
-  canonicalId: string | null,
-): CardImageAsset {
-  if (!canonicalId) return asset;
-  const printings = printingsDataResolved?.[asset.semantic.oracleId ?? ""] ?? [];
-  const printing = printings.find((candidate) => candidate.id.toLowerCase() === canonicalId);
-  if (!printing) return asset;
-  const url = resolvePrintingImageUrl(printing, faceIndex, size);
-  if (!url || isPlaceholderImageUrl(url)) return asset;
-  return {
-    ...asset,
-    src: url,
-    ...remoteImageSource(url, size),
-    semantic: { ...asset.semantic, englishPrintingId: canonicalId },
-  };
-}
-
-
-function resolvePrintingFallback(
-  oracleId: string,
-  faceIndex: number,
-  size: ImageSize,
-): { id: string; url: string } | null {
-  const printings = printingsDataResolved?.[oracleId.toLowerCase()] ?? [];
-  for (const printing of printings) {
-    if (printing.set === "plst") continue;
-    const url = resolvePrintingImageUrl(printing, faceIndex, size);
-    if (url && !isPlaceholderImageUrl(url)) return { id: printing.id, url };
-  }
-  return null;
-}
-
 async function resolveImageAssetWithPrintingFallback(
   entry: ScryfallDataEntry,
   faceIndex: number,
@@ -1416,21 +1288,6 @@ async function resolveImageAssetWithPrintingFallback(
   diagnosticName: string,
 ): Promise<CardImageAsset> {
   const asset = resolveImageAsset(entry, faceIndex, size, diagnosticName);
-
-  // A derived locale has art for only SOME printings of a card — the CDN
-  // localizes community art per printing, and within one set the split is
-  // arbitrary. Every card this locale CAN render is therefore re-addressed onto
-  // the one printing the locale actually has, decided once per card and shared
-  // by every zone. See `canonicalPrintingIdFor` for why "once per card" rather
-  // than "per caller" is the whole point.
-  //
-  // Needs the printings map, which the ordinary path deliberately avoids
-  // loading. It is only reached for derived locales.
-  if (isDerivedArtLocale(desiredArtLang)) {
-    const canonicalId = await canonicalPrintingIdFor(entry.oracle_id);
-    const canonical = applyCanonicalPrinting(asset, faceIndex, size, canonicalId);
-    if (canonical !== asset) return canonical;
-  }
 
   if (!isPlaceholderImageUrl(asset.src)) return asset;
 

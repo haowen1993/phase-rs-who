@@ -27,7 +27,7 @@ import type { DeckArchetype } from "../services/engineRuntime";
 import { detectInitialLanguage, normalizeSupportedLng, type SupportedLng } from "../i18n/resources";
 import { isArtLanguage, type ArtLanguage } from "../services/cardArtLocale.ts";
 import {
-  normalizeCardTextLanguage,
+  restoreCardTextLanguage,
   type CardTextLanguagePreference,
 } from "../services/cardTextLocale.ts";
 
@@ -1194,8 +1194,13 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
           ...migrated,
           language: normalizeSupportedLng(migrated.language, detectInitialLanguage()),
           artLanguage: normalizeArtLanguage(migrated.artLanguage),
-          cardTextLanguage: normalizeCardTextLanguage(
+          // NOT `normalizeCardTextLanguage`: a blob written before this
+          // preference existed has no field here, and normalizing the absence to
+          // "auto" would resolve to the (never-Chinese) interface language and
+          // silently disable card-text localization. See `restoreCardTextLanguage`.
+          cardTextLanguage: restoreCardTextLanguage(
             migrated.cardTextLanguage,
+            buildDefaultPreferences().cardTextLanguage,
           ),
         };
       },
@@ -1211,8 +1216,11 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
           ...saved,
           language: normalizeSupportedLng(saved.language, current.language),
           artLanguage: normalizeArtLanguage(saved.artLanguage),
-          cardTextLanguage: normalizeCardTextLanguage(
+          // `current` already carries either the fork default or the value this
+          // session loaded, so an absent persisted field must defer to it.
+          cardTextLanguage: restoreCardTextLanguage(
             saved.cardTextLanguage,
+            current.cardTextLanguage,
           ),
           logDockSide: saved.logDockSide === "left" || saved.logDockSide === "right"
             ? saved.logDockSide

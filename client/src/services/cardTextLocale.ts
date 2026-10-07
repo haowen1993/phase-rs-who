@@ -55,6 +55,25 @@ export function normalizeCardTextLanguage(value: unknown): CardTextLanguagePrefe
 }
 
 /**
+ * `normalizeCardTextLanguage` for a value read out of PERSISTED state, where
+ * `undefined` means "this blob predates the preference" rather than "invalid".
+ *
+ * The distinction is load-bearing here because `"auto"` resolves to the INTERFACE
+ * language, and the interface has no Chinese catalog (`SUPPORTED_LNGS` contains no
+ * `zhs`). So an absent field normalized to `"auto"` can never reach the Chinese
+ * sidecar: every install that saved preferences before this preference existed
+ * would silently lose card-text localization — which is this fork's whole point.
+ * Falling back to `current` keeps the fork's default for an upgrade and an
+ * explicit choice for anyone who already made one.
+ */
+export function restoreCardTextLanguage(
+  value: unknown,
+  current: CardTextLanguagePreference,
+): CardTextLanguagePreference {
+  return value === undefined ? current : normalizeCardTextLanguage(value);
+}
+
+/**
  * The card-text locale to resolve in, given the interface language and the
  * preference (`"auto"` = follow the interface).
  *

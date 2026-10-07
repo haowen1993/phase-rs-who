@@ -1,7 +1,7 @@
 From d31524fe5187724f41749ece70a4b470a369240d Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Tue, 6 Oct 2026 21:21:47 +0800
-Subject: [PATCH 4/6] feat(engine): bind the resolution-pick keyword anaphor to
+Subject: [PATCH 4/9] feat(engine): bind the resolution-pick keyword anaphor to
  the exiled tracked set
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

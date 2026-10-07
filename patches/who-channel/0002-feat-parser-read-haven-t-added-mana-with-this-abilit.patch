@@ -1,7 +1,7 @@
-From bdf129d6d629b44359311b0a1fd7b6ff24e2cdeb Mon Sep 17 00:00:00 2001
+From 5a0d0db21fc93febc5b56ffa33a5bbeda11fc610 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 02:55:27 +0800
-Subject: [PATCH 2/3] feat(parser): read "haven't added mana with this ability
+Subject: [PATCH 2/9] feat(parser): read "haven't added mana with this ability
  this turn"
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -89,10 +89,10 @@ index a6a8b7c7a5..0fcf6d8a5c 100644
      // fragment was something else that merely shares a prefix.
      if rest.trim_end_matches('.').trim().is_empty() {
 diff --git a/crates/engine/src/parser/oracle_effect/tests.rs b/crates/engine/src/parser/oracle_effect/tests.rs
-index 6cc9ae0a77..24ed965dd7 100644
+index 7ad914178d..8611ebef12 100644
 --- a/crates/engine/src/parser/oracle_effect/tests.rs
 +++ b/crates/engine/src/parser/oracle_effect/tests.rs
-@@ -53234,6 +53234,51 @@ fn veil_of_summer_effect_chain_parses_supported_clauses() {
+@@ -53385,6 +53385,51 @@ fn veil_of_summer_effect_chain_parses_supported_clauses() {
      )));
  }
  

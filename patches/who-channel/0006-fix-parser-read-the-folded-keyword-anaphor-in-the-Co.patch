@@ -1,7 +1,7 @@
 From 21d51fe6d7b4d61284dbbd4038ed12ae2a4f1391 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Tue, 6 Oct 2026 22:27:58 +0800
-Subject: [PATCH 6/6] fix(parser): read the folded keyword anaphor in the
+Subject: [PATCH 6/9] fix(parser): read the folded keyword anaphor in the
  Condition_If swallow detector
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

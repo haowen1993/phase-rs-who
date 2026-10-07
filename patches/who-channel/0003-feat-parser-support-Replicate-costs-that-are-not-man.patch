@@ -1,7 +1,7 @@
-From 8cba172c5a2ef26a0cc864d5ec2bf4922938342d Mon Sep 17 00:00:00 2001
+From 9522d1443d50aa3cdda05f75023c87cb19596e65 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 05:23:47 +0800
-Subject: [PATCH 3/3] feat(parser): support Replicate costs that are not mana
+Subject: [PATCH 3/9] feat(parser): support Replicate costs that are not mana
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

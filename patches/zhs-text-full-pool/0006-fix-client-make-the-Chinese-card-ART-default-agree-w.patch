@@ -1,0 +1,93 @@
+From 39b9160505327e6a968a62cafa217734899da348 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 14:51:55 +0800
+Subject: [PATCH 6/6] fix(client): make the Chinese card-ART default agree with
+ the card-TEXT default
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The two preferences are independent by design, but their defaults disagreed in a
+way that produced a half-Chinese install: text defaulted to `zhs` while art stayed
+`"auto"`. `"auto"` resolves against the INTERFACE language (see
+`resolveArtLanguage` / `useCardImage`), and the interface has no Chinese catalog,
+so the localized rung was never requested. The visible result was a Chinese card
+NAME over English ART — correct per each preference, and indistinguishable from a
+broken feature.
+
+`artLanguage` now defaults to `"zhs"` and gains the same missing-vs-invalid
+distinction the text preference needed: an absent persisted field defers to the
+current value instead of normalizing to `"auto"`. Without that, an install that
+saved preferences before this default existed would keep the old behaviour and the
+new default would only ever apply to fresh installs.
+
+Verified across the shapes that matter: `{}` and `{language:"en"}` → art `zhs`,
+text `zhs`; an explicit `artLanguage:"en"` / `"auto"` → respected; a mixed
+`{cardTextLanguage:"ja"}` → art `zhs`, text `ja`.
+---
+ client/src/stores/preferencesStore.ts | 31 ++++++++++++++++++++++++---
+ 1 file changed, 28 insertions(+), 3 deletions(-)
+
+diff --git a/client/src/stores/preferencesStore.ts b/client/src/stores/preferencesStore.ts
+index 8fb1865473..e56e397bba 100644
+--- a/client/src/stores/preferencesStore.ts
++++ b/client/src/stores/preferencesStore.ts
+@@ -87,6 +87,20 @@ export type ArtLanguagePreference = "auto" | ArtLanguage;
+  * `language`, every legal value is self-contained and none is a superset of the
+  * others, so a rejected value loses no information.
+  */
++/** `normalizeArtLanguage` for a value read out of PERSISTED state, where
++ *  `undefined` means "this blob predates the preference" rather than "invalid".
++ *
++ *  Needed for the same reason as `restoreCardTextLanguage`: this fork defaults
++ *  `artLanguage` to `"zhs"`, and normalizing an absent field to `"auto"` would
++ *  resolve to the interface language and undo that default on every install that
++ *  saved preferences before this preference existed. */
++function restoreArtLanguage(
++  value: unknown,
++  current: ArtLanguagePreference,
++): ArtLanguagePreference {
++  return value === undefined ? current : normalizeArtLanguage(value);
++}
++
+ export function normalizeArtLanguage(value: unknown): ArtLanguagePreference {
+   if (value === "auto") return "auto";
+   return isArtLanguage(value) ? value : "auto";
+@@ -311,7 +325,12 @@ const LEGACY_COMBAT_PACING_MULTIPLIERS: Record<string, number> = {
+ function buildDefaultPreferences(): PreferencesState {
+   return {
+     language: detectInitialLanguage(),
+-    artLanguage: "auto",
++    // This fork ships Chinese CARDS by default, so card ART follows: the two
++    // preferences below are independent by design, but their defaults must agree.
++    // A Chinese-text install rendering English art is the bug this prevents —
++    // `"auto"` resolves to the interface language, which has no Chinese catalog,
++    // so the localized rung would never be requested.
++    artLanguage: "zhs",
+     // This fork ships Chinese card text by default rather than following the
+     // interface language: the interface has no Chinese catalog, so "auto" would
+     // resolve to the (non-Chinese) UI language and the sidecar would never load.
+@@ -1193,7 +1212,10 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+         return {
+           ...migrated,
+           language: normalizeSupportedLng(migrated.language, detectInitialLanguage()),
+-          artLanguage: normalizeArtLanguage(migrated.artLanguage),
++          artLanguage: restoreArtLanguage(
++            migrated.artLanguage,
++            buildDefaultPreferences().artLanguage,
++          ),
+           // NOT `normalizeCardTextLanguage`: a blob written before this
+           // preference existed has no field here, and normalizing the absence to
+           // "auto" would resolve to the (never-Chinese) interface language and
+@@ -1215,7 +1237,10 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+           ...current,
+           ...saved,
+           language: normalizeSupportedLng(saved.language, current.language),
+-          artLanguage: normalizeArtLanguage(saved.artLanguage),
++          artLanguage: restoreArtLanguage(
++            saved.artLanguage,
++            current.artLanguage,
++          ),
+           // `current` already carries either the fork default or the value this
+           // session loaded, so an absent persisted field must defer to it.
+           cardTextLanguage: restoreCardTextLanguage(

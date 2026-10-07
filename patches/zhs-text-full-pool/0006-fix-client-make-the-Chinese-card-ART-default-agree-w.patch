@@ -1,7 +1,7 @@
 From 39b9160505327e6a968a62cafa217734899da348 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 14:51:55 +0800
-Subject: [PATCH 6/6] fix(client): make the Chinese card-ART default agree with
+Subject: [PATCH 6/7] fix(client): make the Chinese card-ART default agree with
  the card-TEXT default
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

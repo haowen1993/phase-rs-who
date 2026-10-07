@@ -1,7 +1,7 @@
 From d8c447ff0dec431f91284ed02db57f29a1d949e5 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 13:55:11 +0800
-Subject: [PATCH 5/7] fix(client): keep the card-text default when persisted
+Subject: [PATCH 5/8] fix(client): keep the card-text default when persisted
  preferences predate it
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

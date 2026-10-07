@@ -1,7 +1,7 @@
 From 83b9ad0de670a3e61f95a9ac372dd7de6380c992 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 15:26:32 +0800
-Subject: [PATCH 7/7] feat(i18n): translate card rulings into Chinese in the
+Subject: [PATCH 7/8] feat(i18n): translate card rulings into Chinese in the
  sidecar
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -1,7 +1,7 @@
 From eea72169db69694370eca244ae10b4c13a838336 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 11:32:39 +0800
-Subject: [PATCH 2/7] feat(client): give card TEXT its own language preference,
+Subject: [PATCH 2/8] feat(client): give card TEXT its own language preference,
  defaulting to Chinese
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

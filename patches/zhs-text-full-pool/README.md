@@ -18,12 +18,12 @@
 
 ```
 main
- └─ patches/who-channel        （解析器/引擎修复 + 卡池与预组收窄的旧做法）
+ └─ patches/who-card-support   （WHO 卡牌的解析器/引擎修复）
      └─ patches/zhs-card-art   （中文卡图 + artLanguage 偏好）
          └─ patches/zhs-text-full-pool   （本系列）
 ```
 
-**已知的耦合代价**：`patches/who-channel/README.md` 的第 1 节（卡池）在本系列里
+**已知的耦合代价**：`patches/who-card-support/README.md` 的第 1 节（卡池）在本系列里
 被改写成了"已改为全量"，因为收窄卡池的记录就在那个文件里。所以两个系列的 README
 有交叉引用 —— 读的时候两边都要看。
 

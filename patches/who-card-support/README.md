@@ -1,18 +1,29 @@
-# 补丁：神秘博士（WHO）专用频道
+# 补丁：神秘博士（WHO）**卡牌支持**
 
-把 phase.rs 改造成「打开就是神秘博士指挥官」的专用客户端。保留上游全部代码，改动全部以补丁形式维护。
+让神秘博士系列的牌在引擎里真正可用 —— 解析器与引擎修复，外加一个**可选的**预组目录过滤开关。
+
+> **这个系列不是"一个只有 WHO 的频道"。** 它曾经是：最初的做法是把卡池收窄成 WHO 366 张，
+> 让客户端「打开就是四套博士预组」。**那个做法已废弃**（见第 1 节），现在卡池是**全量**，
+> WHO 只是其中一个系列。名字随之从 `who-channel` 改为 `who-card-support`。
 
 ## 这个目录是什么
 
 ```
-patches/who-channel/
-  README.md                                              ← 本文件
-  0001-feat-build-allow-scoping-the-precon-catalog-...patch ← 预组目录范围控制
+patches/who-card-support/
+  README.md                                                       ← 本文件
+  0001-feat-build-allow-scoping-the-precon-catalog-to-one-p.patch ← 预组目录范围控制（可选）
+  0002..0009                                                      ← 解析器与引擎修复
 ```
 
-分支：`patches/who-channel`（基于 `main` 的 `59b2b17`）。
+分支：`who-card-support`（基于 `main`）。
 
-补丁**只含它触及的目录**（这里是 `scripts/`）。生成方式见顶层 `CLAUDE.md` 的「Local Patches」一节。
+补丁**只含它触及的目录**（`crates/`、`client/src/`、`scripts/`）。生成方式见顶层 `CLAUDE.md` 的「Local Patches」一节。
+
+## 这些修复为什么与"频道"无关
+
+系列里改的是**真实的牌**（`Clara Oswald`、`The Eleventh Doctor` 等 —— 它们**只出现在 WHO 系列**，
+但**就在全量卡池里**），所以这些修复修的是引擎的正确性，不是给某个频道专用的代码。
+卡池和卡图**都不在这个系列里**：它们各有唯一一份数据，见第 1、4 节。
 
 ## 已完成
 
@@ -543,7 +554,7 @@ pnpm --dir client dev        # http://localhost:5173/
 
 ```bash
 git checkout main && git pull
-git checkout patches/who-channel
+git checkout patches/who-card-support
 git rebase main          # 冲突几乎只在 scripts/gen-card-data.sh
 ```
 
@@ -554,6 +565,6 @@ git rebase main          # 冲突几乎只在 scripts/gen-card-data.sh
 两者独立、可并存：
 
 - `patches/zhs-card-art/` — 简体中文卡图（纯客户端外观）
-- `patches/who-channel/` — 神秘博士卡池与预组范围（数据构建）
+- `patches/who-card-support/` — 神秘博士卡池与预组范围（数据构建）
 
 它们改的文件没有重叠（前者 `client/`，后者 `scripts/`）。

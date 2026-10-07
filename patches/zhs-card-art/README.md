@@ -263,9 +263,9 @@ git format-patch main..HEAD --no-signature --output-directory patches/zhs-card-a
 ```
 
 **为什么要那三个 exclude**：Replicate 那个提交**同时改 `client/` 和 `crates/`**（一次原子改动：
-引擎放宽费用类型 + 客户端格式化器接受新形状）。它整体属于 `who-channel` 系列，
+引擎放宽费用类型 + 客户端格式化器接受新形状）。它整体属于 `who-card-support` 系列，
 所以这里按它拥有的三个客户端文件排除，否则本系列会带上它的**残缺副本**——
-引擎侧在 who-channel、客户端侧在这里，两边都不完整。
+引擎侧在 who-card-support、客户端侧在这里，两边都不完整。
 
 **怎么验证分离成功**（别只读补丁文件）：套到干净检出上试。
 
@@ -274,7 +274,7 @@ git worktree add --detach /tmp/verify <上游提交>
 cd /tmp/verify && git am /path/to/patches/zhs-card-art/*.patch   # 应全部 Applying，无冲突
 ```
 
-再单独对 `patches/who-channel/*.patch` 重复一次（先 `git reset --hard`）。
+再单独对 `patches/who-card-support/*.patch` 重复一次（先 `git reset --hard`）。
 
 ## 验证情况
 

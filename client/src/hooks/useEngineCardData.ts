@@ -6,6 +6,7 @@ import {
 } from "../services/engineRuntime";
 import { getSharedAdapter } from "../adapter/wasm-adapter";
 import { usePreferencesStore } from "../stores/preferencesStore";
+import { resolveCardTextLanguage } from "../services/cardTextLocale";
 
 /**
  * Engine-parsed card face data returned from WASM.
@@ -50,7 +51,13 @@ export interface ParsedItem {
  * wrapper ensures that as a prerequisite, then performs the query.
  */
 export function useEngineCardData(cardName: string | null): EngineCardFace | null {
-  const language = usePreferencesStore((s) => s.language);
+  // Card TEXT follows its own preference, not the interface language: the
+  // interface has no Chinese catalog, so keying card text off `language`
+  // would make a Chinese sidecar unreachable. Falls back to the interface
+  // language when the preference is "auto".
+  const language = usePreferencesStore((s) =>
+    resolveCardTextLanguage(s.language, s.cardTextLanguage),
+  );
   const [data, setData] = useState<EngineCardFace | null>(null);
 
   useEffect(() => {
@@ -101,7 +108,13 @@ export function useEngineCardData(cardName: string | null): EngineCardFace | nul
  * card name — the engine's identity key, which stays English everywhere.
  */
 export function useLocalizedCardName(name: string | null): string | null {
-  const language = usePreferencesStore((s) => s.language);
+  // Card TEXT follows its own preference, not the interface language: the
+  // interface has no Chinese catalog, so keying card text off `language`
+  // would make a Chinese sidecar unreachable. Falls back to the interface
+  // language when the preference is "auto".
+  const language = usePreferencesStore((s) =>
+    resolveCardTextLanguage(s.language, s.cardTextLanguage),
+  );
   const [localized, setLocalized] = useState<string | null>(name);
 
   useEffect(() => {

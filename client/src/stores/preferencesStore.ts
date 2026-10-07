@@ -26,6 +26,10 @@ import { DEFAULT_AI_DIFFICULTY } from "../constants/ai";
 import type { DeckArchetype } from "../services/engineRuntime";
 import { detectInitialLanguage, normalizeSupportedLng, type SupportedLng } from "../i18n/resources";
 import { isArtLanguage, type ArtLanguage } from "../services/cardArtLocale.ts";
+import {
+  normalizeCardTextLanguage,
+  type CardTextLanguagePreference,
+} from "../services/cardTextLocale.ts";
 
 /** Literal sentinel for "any deck" in AI deck selection. Mirrors `DeckChoice::Random`
  *  naming so the preference value is self-describing without a nullable field. */
@@ -308,6 +312,10 @@ function buildDefaultPreferences(): PreferencesState {
   return {
     language: detectInitialLanguage(),
     artLanguage: "auto",
+    // This fork ships Chinese card text by default rather than following the
+    // interface language: the interface has no Chinese catalog, so "auto" would
+    // resolve to the (non-Chinese) UI language and the sidecar would never load.
+    cardTextLanguage: "zhs",
     cardSize: "medium",
     hudLayout: "inline",
     followActiveOpponent: true,
@@ -378,6 +386,12 @@ interface PreferencesState {
   /** Card-art language, or `"auto"` to follow `language`. Resolution lives in
    *  `resolveArtLanguage` so the store field stays a plain preference. */
   artLanguage: ArtLanguagePreference;
+  /** Card-TEXT language (name / Oracle text / type line), or `"auto"` to follow
+   *  `language`. Independent of `artLanguage`: the two sets differ (Polish has a
+   *  UI and no localized text; Chinese has text and art but no UI catalog), so a
+   *  player may read Chinese cards with non-Chinese art or the reverse. Resolution
+   *  lives in `resolveCardTextLanguage` so the store field stays a preference. */
+  cardTextLanguage: CardTextLanguagePreference;
   cardSize: CardSizePreference;
   hudLayout: HudLayout;
   followActiveOpponent: boolean;
@@ -493,6 +507,7 @@ interface PreferencesState {
 interface PreferencesActions {
   setLanguage: (lng: SupportedLng) => void;
   setArtLanguage: (lng: ArtLanguagePreference) => void;
+  setCardTextLanguage: (lng: CardTextLanguagePreference) => void;
   setCardSize: (size: CardSizePreference) => void;
   setHudLayout: (layout: HudLayout) => void;
   setFollowActiveOpponent: (enabled: boolean) => void;
@@ -643,6 +658,7 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
       // Card art only — deliberately does NOT touch `language`, so a player can
       // read the UI in English and still play with Chinese cards.
       setArtLanguage: (lng) => set({ artLanguage: lng }),
+      setCardTextLanguage: (lng) => set({ cardTextLanguage: lng }),
       setCardSize: (size) => set({ cardSize: size }),
       setHudLayout: (layout) => set({ hudLayout: layout }),
       setFollowActiveOpponent: (enabled) => set({ followActiveOpponent: enabled }),
@@ -1178,6 +1194,9 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
           ...migrated,
           language: normalizeSupportedLng(migrated.language, detectInitialLanguage()),
           artLanguage: normalizeArtLanguage(migrated.artLanguage),
+          cardTextLanguage: normalizeCardTextLanguage(
+            migrated.cardTextLanguage,
+          ),
         };
       },
       // Persisted state is external input. Migration only runs when the schema
@@ -1192,6 +1211,9 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
           ...saved,
           language: normalizeSupportedLng(saved.language, current.language),
           artLanguage: normalizeArtLanguage(saved.artLanguage),
+          cardTextLanguage: normalizeCardTextLanguage(
+            saved.cardTextLanguage,
+          ),
           logDockSide: saved.logDockSide === "left" || saved.logDockSide === "right"
             ? saved.logDockSide
             : "right",

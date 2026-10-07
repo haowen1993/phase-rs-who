@@ -72,6 +72,7 @@ const GROUP_BY_LABELS: Record<string, string> = {
   pl: "Grupuj według",
   pt: "Agrupar por",
   ja: "グループ分け",
+  zhs: "分组依据",
 };
 
 const isKnownGap = (ns: string, key: string) =>

@@ -78,7 +78,13 @@ describe("i18n resources", () => {
     expect(normalizeSupportedLng("PT-br", "en")).toBe("pt");
     expect(normalizeSupportedLng("ja-JP", "en")).toBe("ja");
     expect(normalizeSupportedLng(" de-CH ", "en")).toBe("de");
-    expect(normalizeSupportedLng("zh-Hans", "fr")).toBe("fr");
+    // The app ships ONE Chinese, simplified, so every `zh*` browser tag maps to
+    // it — traditional tags included, since there is no separate catalog.
+    expect(normalizeSupportedLng("zh", "en")).toBe("zhs");
+    expect(normalizeSupportedLng("zh-CN", "en")).toBe("zhs");
+    expect(normalizeSupportedLng("zh-Hans", "en")).toBe("zhs");
+    expect(normalizeSupportedLng("zh-Hant", "en")).toBe("zhs");
+    expect(normalizeSupportedLng("zh-TW", "en")).toBe("zhs");
     expect(normalizeSupportedLng(null, "it")).toBe("it");
   });
 });

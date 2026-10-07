@@ -383,12 +383,14 @@ describe("preferencesStore", () => {
   it("falls back from an unsupported current-version persisted locale", () => {
     localStorage.setItem(
       "phase-preferences",
-      JSON.stringify({ state: { language: "zh-Hans" }, version: 34 }),
+      // Korean, not Chinese: Chinese IS shipped, so a test that used it here
+      // would stop exercising the fallback the moment the locale was added.
+      JSON.stringify({ state: { language: "ko-KR" }, version: 34 }),
     );
 
     act(() => usePreferencesStore.persist.rehydrate());
 
-    expect(["en", "es", "fr", "de", "it", "pt", "pl", "ja"]).toContain(
+    expect(["en", "es", "fr", "de", "it", "pt", "pl", "ja", "zhs"]).toContain(
       usePreferencesStore.getState().language,
     );
   });

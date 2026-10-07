@@ -1270,6 +1270,25 @@ function isPlaceholderImageUrl(url: string): boolean {
   return url === "https://errors.scryfall.com/soon.jpg";
 }
 
+/** The first printing of `oracleId` that yields a usable image, or null.
+ *
+ * The last resort behind `isPlaceholderImageUrl`: Scryfall names a printing whose
+ * image it does not serve, so this walks the card's printings for one that does.
+ */
+function resolvePrintingFallback(
+  oracleId: string,
+  faceIndex: number,
+  size: ImageSize,
+): { id: string; url: string } | null {
+  const printings = printingsDataResolved?.[oracleId.toLowerCase()] ?? [];
+  for (const printing of printings) {
+    if (printing.set === "plst") continue;
+    const url = resolvePrintingImageUrl(printing, faceIndex, size);
+    if (url && !isPlaceholderImageUrl(url)) return { id: printing.id, url };
+  }
+  return null;
+}
+
 /**
  * Resolve a card's image, falling back to another printing when the preferred
  * one has no art at all.

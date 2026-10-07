@@ -2098,14 +2098,31 @@ describe("derived card art locales", () => {
     expect(mod.resolvePrintingImageUrl(printing(EN_ID), 1, "normal")).toBe(derivedUrl(EN_ID, "zhs", "normal", "back"));
   });
 
-  it("leaves art crops on Scryfall", async () => {
+  it("sends art crops to the language-neutral prefix", async () => {
     const mod = await loadScryfallModule();
     await mod.loadLocaleArt("zhs");
 
-    // An art crop is the illustration alone and carries no language; the stored
-    // crop URL is also the one the browser already cached, so moving it to a
-    // second host would re-download the identical picture to gain nothing.
-    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "art_crop")).toBe(scryfallUrl(EN_ID, "art_crop"));
+    // An art crop is the illustration alone and carries no language, and this
+    // host serves no localized crop at all (measured 404). It therefore goes to
+    // the SAME printing on the language-neutral prefix rather than to the
+    // localized one, which would spend a guaranteed 404 on every hover preview.
+    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "art_crop")).toBe(
+      derivedUrl(EN_ID, "sf", "art_crop"),
+    );
+  });
+
+  it("rewrites a printing the locale has no art for, and keeps its id", async () => {
+    const mod = await loadScryfallModule();
+    await mod.loadLocaleArt("zhs");
+
+    // The rewrite is UNCONDITIONAL: it does not consult whether this printing has
+    // localized art, because asking that question needs a measured table and an
+    // answer two callers can disagree about. The CDN's 404 picks the rung, so the
+    // printing id must survive the rewrite unchanged.
+    const printingId = "11111111-2222-3333-4444-555555555555";
+    expect(mod.resolvePrintingImageUrl(printing(printingId), 0, "normal")).toBe(
+      derivedUrl(printingId, "zhs"),
+    );
   });
 
   it("drops the English cache-buster, which names no object on that host", async () => {

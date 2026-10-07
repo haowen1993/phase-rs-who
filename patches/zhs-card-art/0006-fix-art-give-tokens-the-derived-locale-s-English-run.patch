@@ -1,7 +1,7 @@
-From 2821a490345351c32b101bc489e11d5ecdc8ce90 Mon Sep 17 00:00:00 2001
+From 20a48a0b24dbd4813278b72080774843afb3344e Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 00:57:31 +0800
-Subject: [PATCH 07/11] fix(art): give tokens the derived locale's English rung
+Subject: [PATCH 6/9] fix(art): give tokens the derived locale's English rung
  too
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

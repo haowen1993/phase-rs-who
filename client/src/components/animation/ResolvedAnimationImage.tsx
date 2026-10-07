@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import type { GameObject, TokenImageRef } from "../../adapter/types.ts";
 import { useCardImage } from "../../hooks/useCardImage.ts";
 import { objectImageProps } from "../../services/cardImageLookup.ts";
-import { supportsAnonymousCors } from "../../services/scryfall.ts";
+import { useCanvasImageCors } from "../../services/canvasCorsRetry.ts";
 import type { TokenSearchFilters } from "../../services/scryfall.ts";
 
 export interface AnimationImageSnapshot {
@@ -87,19 +87,18 @@ export function ResolvedAnimationImage({
   if (!src) return fallback;
 
   const capturedSrc = src;
-  // `crossOrigin` is dropped for a host whose headers cannot satisfy a CORS
-  // check (see `supportsAnonymousCors`). Callers pass it because these layers
-  // read pixels back out of a canvas, which needs a CORS-clean image — but that
-  // requirement must not be allowed to fail the load itself. Without the
-  // attribute the browser fetches in no-cors mode, the art displays, and only
-  // the canvas read is lost.
-  const { crossOrigin, ...restAttributes } = imageAttributes;
-  const corsAttributes =
-    crossOrigin && supportsAnonymousCors(capturedSrc) ? { crossOrigin } : {};
+  // These layers upload the image into WebGL, which needs a CORS-clean load; a
+  // host that cannot answer one gets a single no-cors retry so the art still
+  // appears. See `useCanvasImageCors`.
+  const wantsCors = Boolean(imageAttributes.crossOrigin);
+  const { crossOrigin: corsValue, onError: retryWithoutCors } = useCanvasImageCors(
+    wantsCors ? capturedSrc : null,
+  );
+  const { crossOrigin: _declared, ...restAttributes } = imageAttributes;
   return (
     <img
       {...restAttributes}
-      {...corsAttributes}
+      {...(corsValue ? { crossOrigin: corsValue } : {})}
       src={capturedSrc}
       alt={alt}
       onLoad={(event) => {
@@ -107,7 +106,13 @@ export function ResolvedAnimationImage({
         settledRef.current = true;
         onReady?.(event.currentTarget, capturedSrc);
       }}
-      onError={() => advanceFailedSource?.(capturedSrc)}
+      onError={() => {
+        if (wantsCors && corsValue) {
+          retryWithoutCors();
+          return;
+        }
+        advanceFailedSource?.(capturedSrc);
+      }}
     />
   );
 }

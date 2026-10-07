@@ -21,7 +21,7 @@ import type { Texture } from "three";
 import type { ObjectId } from "../../../adapter/types.ts";
 import { useCardBackImage } from "../../../hooks/useCardImage.ts";
 import type { CardImageSource } from "../../../services/visualPacks/types.ts";
-import { supportsAnonymousCors } from "../../../services/scryfall.ts";
+import { useCanvasImageCors } from "../../../services/canvasCorsRetry.ts";
 import { useAnimationStore } from "../../../stores/animationStore.ts";
 import { useGameStore } from "../../../stores/gameStore.ts";
 import { usePreferencesStore } from "../../../stores/preferencesStore.ts";
@@ -478,7 +478,22 @@ class CardVfxController {
           classic();
           return;
         }
-        const surface = scene.uploadFace(drawSurface(layout, image, pixelRatioFor(this.tier)));
+        // Drawing a cross-origin image WITHOUT `crossOrigin` taints the canvas,
+        // and uploading a tainted canvas to WebGL throws. That is the whole gap
+        // this guards: the derived locale's CDN cannot answer a CORS request (it
+        // sends `access-control-allow-origin` twice) while every plain `<img>` in
+        // the app loads its art fine in no-cors mode. So the layer keeps demanding
+        // a CORS-clean image — the animation needs it — and a card whose art
+        // cannot supply one falls back to the classic presentation, which is a
+        // path this method already has. Losing the art to keep the animation, or
+        // throwing during a render, would both be worse than losing the animation.
+        let surface: Texture;
+        try {
+          surface = scene.uploadFace(drawSurface(layout, image, pixelRatioFor(this.tier)));
+        } catch {
+          classic();
+          return;
+        }
         ready(scene, { pose, surface, radius: layout.radius });
       },
       classic,
@@ -959,6 +974,9 @@ export function corsOnlySrc(source: Extract<CardImageSource, { src: string }>): 
  *  once: the loaded image, or `null` when every source failed. */
 function CardBackLoader({ onSettled }: { onSettled: (image: HTMLImageElement | null) => void }) {
   const { src, source, isLoading, advanceFailedSource } = useCardBackImage();
+  const { crossOrigin: corsValue, onError: retryWithoutCors } = useCanvasImageCors(
+    source && source.kind !== "fallback" ? source.src : null,
+  );
 
   useEffect(() => {
     if (!isLoading && !src) onSettled(null);
@@ -969,13 +987,19 @@ function CardBackLoader({ onSettled }: { onSettled: (image: HTMLImageElement | n
     <img
       src={corsOnlySrc(source)}
       alt=""
-      // Dropped where the host cannot pass a CORS check — see
-      // `supportsAnonymousCors`. The card back must render even when the canvas
-      // read is impossible.
-      {...(supportsAnonymousCors(source.src) ? { crossOrigin: "anonymous" as const } : {})}
+      // WebGL needs a CORS-clean image; a host that cannot answer one gets a
+      // single no-cors retry so the card back still appears. See
+      // `useCanvasImageCors`.
+      {...(corsValue ? { crossOrigin: corsValue } : {})}
       onLoad={(event) => onSettled(event.currentTarget)}
       // The ladder advances on the source's own URL, not the rewritten one.
-      onError={() => advanceFailedSource?.(source.src)}
+      onError={() => {
+        if (corsValue) {
+          retryWithoutCors();
+          return;
+        }
+        advanceFailedSource?.(source.src);
+      }}
     />
   );
 }

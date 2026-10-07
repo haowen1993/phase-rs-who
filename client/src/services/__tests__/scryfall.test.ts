@@ -2098,31 +2098,6 @@ describe("derived card art locales", () => {
     expect(mod.resolvePrintingImageUrl(printing(EN_ID), 1, "normal")).toBe(derivedUrl(EN_ID, "zhs", "normal", "back"));
   });
 
-  it("refuses anonymous CORS for a host whose headers cannot pass it", async () => {
-    const mod = await loadScryfallModule();
-
-    // Scryfall's CDN sends `access-control-allow-origin` once and answers a CORS
-    // request cleanly, so the canvas layers may request its images with
-    // `crossOrigin="anonymous"`.
-    expect(mod.supportsAnonymousCors("https://cards.scryfall.io/normal/front/a/b/ab.jpg")).toBe(true);
-    // Card BACKS live on a second Scryfall host, which also sends the header once.
-    expect(mod.supportsAnonymousCors("https://backs.scryfall.io/normal/0/a/0a.jpg")).toBe(true);
-
-    // The derived locale's CDN sends the header TWICE:
-    //     access-control-allow-origin: *
-    //     access-control-allow-origin: *
-    // A duplicate is a hard failure — the browser reports "the header contains
-    // multiple values, but only one is allowed" and refuses the response. A
-    // no-cors `<img>` loads the same URL happily, so asking for CORS there turns
-    // a working image into a failed one and the card falls back to English.
-    // Measured against images.mtgch.com; see `supportsAnonymousCors`.
-    expect(mod.supportsAnonymousCors("https://images.mtgch.com/zhs/normal/front/a/b/ab.webp")).toBe(false);
-    expect(mod.supportsAnonymousCors("https://images.mtgch.com/sf/art_crop/front/a/b/ab.webp")).toBe(false);
-
-    // Anything unparseable is not a URL to hand a CORS-mode request.
-    expect(mod.supportsAnonymousCors("not a url")).toBe(false);
-  });
-
   it("sends art crops to the language-neutral prefix", async () => {
     const mod = await loadScryfallModule();
     await mod.loadLocaleArt("zhs");

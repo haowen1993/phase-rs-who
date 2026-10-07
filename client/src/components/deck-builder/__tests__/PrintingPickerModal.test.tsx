@@ -45,10 +45,16 @@ describe("PrintingPickerModal localized art", () => {
     cleanup();
     vi.unstubAllGlobals();
     usePreferencesStore.getState().setLanguage("en");
+    usePreferencesStore.getState().setArtLanguage("auto");
   });
 
   it("swaps tile art when the locale map arrives after the modal mounts", async () => {
     usePreferencesStore.getState().setLanguage("de");
+    // Card-art language is an independent preference and this fork defaults it to
+    // Simplified Chinese, which would take precedence over the interface language
+    // this suite means to exercise. Pin it so "localized art" here means the
+    // MAPPED locale (German), which is the mechanism under test.
+    usePreferencesStore.getState().setArtLanguage("auto");
 
     // Hold the locale map in flight so the modal is forced through the state
     // this test exists for: mounted, localized language, no map yet.

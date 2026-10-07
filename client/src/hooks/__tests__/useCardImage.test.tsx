@@ -794,6 +794,11 @@ describe("useCardImage", () => {
     }));
 
     const { useCardImage } = await import("../useCardImage");
+    // Pin the card-art language. This fork defaults it to Simplified Chinese, so a
+    // test that asserts English art must say so rather than inherit a default it
+    // does not mean to exercise — the same reason it sets `forcedOffline`.
+    (await import("../../stores/preferencesStore.ts")).usePreferencesStore
+      .getState().setArtLanguage("auto");
     const { result } = renderHook(() => useCardImage("Offline Card"));
     await waitFor(() => expect(result.current.src).toBe("http://visual-pack.localhost/installed-0"));
     expect(result.current.rungs).toEqual({
@@ -922,6 +927,11 @@ describe("useCardImage", () => {
 
     const { decodeCandidateKey } = await import("../../services/visualPacks/candidateKeys.ts");
     const { useCardImage } = await import("../useCardImage.ts");
+    // Pin the card-art language. This fork defaults it to Simplified Chinese, so a
+    // test that asserts English art must say so rather than inherit a default it
+    // does not mean to exercise — the same reason it sets `forcedOffline`.
+    (await import("../../stores/preferencesStore.ts")).usePreferencesStore
+      .getState().setArtLanguage("auto");
     const { result } = renderHook(() => useCardImage("Cárd", {
       oracleId: "11111111-1111-4111-8111-111111111111",
       faceName: "Cárd",
@@ -1109,6 +1119,11 @@ describe("useCardImage", () => {
       collectorNumber: "1",
     });
     const { useCardImage } = await import("../useCardImage.ts");
+    // Pin the card-art language. This fork defaults it to Simplified Chinese, so a
+    // test that asserts English art must say so rather than inherit a default it
+    // does not mean to exercise — the same reason it sets `forcedOffline`.
+    (await import("../../stores/preferencesStore.ts")).usePreferencesStore
+      .getState().setArtLanguage("auto");
     const { result } = renderHook(() => useCardImage("Front", {
       oracleId: "11111111-1111-4111-8111-111111111111",
       faceName: "Back",
@@ -1142,6 +1157,11 @@ describe("useCardImage", () => {
     const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
     useConnectivityStore.setState({ forcedOffline: true, browserOnline: true });
     const { useCardImage } = await import("../useCardImage.ts");
+    // Pin the card-art language. This fork defaults it to Simplified Chinese, so a
+    // test that asserts English art must say so rather than inherit a default it
+    // does not mean to exercise — the same reason it sets `forcedOffline`.
+    (await import("../../stores/preferencesStore.ts")).usePreferencesStore
+      .getState().setArtLanguage("auto");
     const initialProps: { size: "art_crop" | "large" } = { size: "art_crop" };
     const { result, rerender } = renderHook(({ size }: { size: "art_crop" | "large" }) => useCardImage("Card", {
       oracleId: "11111111-1111-4111-8111-111111111111",
@@ -1180,6 +1200,11 @@ describe("useCardImage", () => {
     const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
     useConnectivityStore.setState({ forcedOffline: true, browserOnline: true });
     const { useCardImage } = await import("../useCardImage.ts");
+    // Pin the card-art language. This fork defaults it to Simplified Chinese, so a
+    // test that asserts English art must say so rather than inherit a default it
+    // does not mean to exercise — the same reason it sets `forcedOffline`.
+    (await import("../../stores/preferencesStore.ts")).usePreferencesStore
+      .getState().setArtLanguage("auto");
     const initialProps: { sourcePrinting?: { setCode: string; collectorNumber: string } } = {
       sourcePrinting: { setCode: "ABC", collectorNumber: "1" },
     };
@@ -1249,6 +1274,11 @@ describe("useCardImage", () => {
     const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
     useConnectivityStore.setState({ forcedOffline: true, browserOnline: true });
     const { useCardImage } = await import("../useCardImage.ts");
+    // Pin the card-art language. This fork defaults it to Simplified Chinese, so a
+    // test that asserts English art must say so rather than inherit a default it
+    // does not mean to exercise — the same reason it sets `forcedOffline`.
+    (await import("../../stores/preferencesStore.ts")).usePreferencesStore
+      .getState().setArtLanguage("auto");
     const { result } = renderHook(() => useCardImage("Card", {
       oracleId: "11111111-1111-4111-8111-111111111111",
       faceName: "Card",
@@ -1335,6 +1365,11 @@ describe("useCardImage", () => {
     const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
     useConnectivityStore.setState({ forcedOffline: false, browserOnline: true });
     const { useCardImage } = await import("../useCardImage.ts");
+    // Pin the card-art language. This fork defaults it to Simplified Chinese, so a
+    // test that asserts English art must say so rather than inherit a default it
+    // does not mean to exercise — the same reason it sets `forcedOffline`.
+    (await import("../../stores/preferencesStore.ts")).usePreferencesStore
+      .getState().setArtLanguage("auto");
     const { result } = renderHook(() => useCardImage("Card", {
       oracleId: "11111111-1111-4111-8111-111111111111",
       faceName: "Card",
@@ -1416,6 +1451,11 @@ describe("useCardImage", () => {
     const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
     useConnectivityStore.setState({ forcedOffline: false, browserOnline: true });
     const { useCardImage } = await import("../useCardImage.ts");
+    // Pin the card-art language. This fork defaults it to Simplified Chinese, so a
+    // test that asserts English art must say so rather than inherit a default it
+    // does not mean to exercise — the same reason it sets `forcedOffline`.
+    (await import("../../stores/preferencesStore.ts")).usePreferencesStore
+      .getState().setArtLanguage("auto");
     const { result, rerender } = renderHook(({ name }) => useCardImage(name, {
       oracleId: "11111111-1111-4111-8111-111111111111",
       faceName: "Card",
@@ -1494,6 +1534,11 @@ describe("useCardImage", () => {
     const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
     useConnectivityStore.setState({ forcedOffline: false, browserOnline: true });
     const { useCardImage } = await import("../useCardImage.ts");
+    // Pin the card-art language. This fork defaults it to Simplified Chinese, so a
+    // test that asserts English art must say so rather than inherit a default it
+    // does not mean to exercise — the same reason it sets `forcedOffline`.
+    (await import("../../stores/preferencesStore.ts")).usePreferencesStore
+      .getState().setArtLanguage("auto");
     const { result, rerender } = renderHook(({ tick }) => {
       void tick;
       return useCardImage("Card", { faceName: "Card", faceIndex: 0 });

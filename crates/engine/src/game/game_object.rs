@@ -1282,6 +1282,24 @@ pub struct GameObject {
     // Commander: whether this object is a commander card
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_commander: bool,
+    /// CR 607.2p + CR 903.3: the color a card chose for its own
+    /// characteristic-defining ability BEFORE THE GAME BEGAN ("Impossible Girl —
+    /// If Clara Oswald is your commander, choose a color before the game begins.
+    /// Clara Oswald is the chosen color.").
+    ///
+    /// A dedicated field rather than `ChosenAttribute::Color`, because CR 607.2p
+    /// makes this a LINKED pair whose reference "continues to refer to that
+    /// choice as the object changes zones during the game", while
+    /// `chosen_attributes` is cleared by `reset_for_battlefield_entry` (CR 400.7)
+    /// on every battlefield entry — a commander chosen in the command zone would
+    /// lose its color the moment it resolved onto the battlefield.
+    ///
+    /// Like `is_commander`, this is an attribute of the CARD: set once during the
+    /// pregame procedure and never cleared. `GameObject::chosen_color` reads it
+    /// FIRST, so the whole `AddChosenColor` / `IsChosenColor` / chosen-color
+    /// keyword family resolves against it with no further changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commander_color_choice: Option<ManaColor>,
     /// Oathbreaker RC: command-zone signature-spell role.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature_spell: Option<SignatureSpellState>,
@@ -1856,6 +1874,7 @@ fn _gameobject_partition_is_total(o: &GameObject) {
         // synchronously by `push_ability_entry` into the resolving
         // `ResolvedAbility`'s own `noted_mana_payment` snapshot (§5.2c).
         mana_spent_to_activate: _,
+        commander_color_choice: _,
     } = o;
 }
 
@@ -3018,6 +3037,7 @@ impl GameObject {
             blocked_abilities: Vec::new(),
             loyalty_activations_this_turn: 0,
             is_commander: false,
+            commander_color_choice: None,
             signature_spell: None,
             commander_tax: None,
             is_renowned: false,
@@ -3706,6 +3726,15 @@ impl GameObject {
     /// Sibling of `current_chosen_color` (newest) — see that doc for why the
     /// two accessors read different ends of the same list.
     pub fn chosen_color(&self) -> Option<ManaColor> {
+        // CR 607.2p: a pregame choice made for a characteristic-defining ability
+        // outranks every in-game one, and is the ONLY reading that survives a
+        // zone change (`chosen_attributes` is cleared per battlefield entry).
+        // Consulting it first means the whole chosen-color family —
+        // `AddChosenColor`, `FilterProp::IsChosenColor`, `HexproofFrom`/
+        // `Protection(ChosenColor)` — serves this card with no further change.
+        if let Some(choice) = self.commander_color_choice {
+            return Some(choice);
+        }
         self.chosen_attributes.iter().find_map(|a| match a {
             ChosenAttribute::Color(c) => Some(*c),
             _ => None,

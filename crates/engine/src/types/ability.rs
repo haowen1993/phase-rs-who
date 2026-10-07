@@ -11996,6 +11996,27 @@ pub enum StaticCondition {
     /// Once a creature is blocked, it remains blocked for the rest of combat even
     /// if all its blockers leave — mirrors `AttackerInfo.blocked` (sticky flag).
     SourceIsBlocked,
+    /// CR 903.3: True when the source card is a commander. Commander designation
+    /// is "an attribute of the card itself", not a characteristic, and "the card
+    /// retains this designation even when it changes zones" — so this reads
+    /// `GameObject::is_commander`, which is set once at deck construction and
+    /// never cleared, and it is true in every zone including the command zone.
+    ///
+    /// CR 903.3d sharpens the distinction the read has to respect: an effect
+    /// that refers to CONTROLLING a commander means a permanent on the
+    /// battlefield, while an effect that refers to "your commander" in a named
+    /// zone — or to a characteristic of your commander, which CR 903.3e allows
+    /// "in all zones, including that player's library and hand" — does not.
+    /// This variant is the source-identity read only; a controller-gated
+    /// variant (`SourceIsYourCommander`) belongs with it if a card needs one.
+    ///
+    /// Motivating card — Clara Oswald, "Impossible Girl — If Clara Oswald is
+    /// your commander, choose a color before the game begins. Clara Oswald is
+    /// the chosen color." CR 607.2p makes that choice/reader pair linked
+    /// abilities whose reference survives zone changes, so the chosen color
+    /// lives in `GameObject::commander_color_choice` rather than in
+    /// `chosen_attributes` (which CR 400.7 clears on each battlefield entry).
+    SourceIsCommander,
     /// CR 725.1: monarch IDENTITY — true when `player` currently holds the
     /// monarch designation (CR 725.3: exactly one player at a time; CR 725.4
     /// governs reassignment). Distinct from [`NoMonarch`](Self::NoMonarch),
@@ -12373,6 +12394,7 @@ impl StaticCondition {
             | StaticCondition::DuringOpponentsTurn
             | StaticCondition::SharesColorWithMostCommonColorAmongPermanents
             | StaticCondition::SourceEnteredThisTurn
+            | StaticCondition::SourceIsCommander
             | StaticCondition::SourceHasDealtDamage
             | StaticCondition::WasCast { .. }
             | StaticCondition::IsRingBearer
@@ -12468,6 +12490,7 @@ impl StaticCondition {
             | StaticCondition::SourceIsAttacking
             | StaticCondition::SourceIsBlocking
             | StaticCondition::SourceIsBlocked
+            | StaticCondition::SourceIsCommander
             | StaticCondition::IsMonarch { .. }
             | StaticCondition::IsInitiative
             | StaticCondition::NoMonarch
@@ -12701,6 +12724,7 @@ impl StaticCondition {
             | StaticCondition::SourceIsAttacking
             | StaticCondition::SourceIsBlocking
             | StaticCondition::SourceIsBlocked
+            | StaticCondition::SourceIsCommander
             | StaticCondition::IsMonarch { .. }
             | StaticCondition::IsInitiative
             | StaticCondition::NoMonarch
@@ -12818,6 +12842,7 @@ impl StaticCondition {
             | StaticCondition::SourceIsAttacking
             | StaticCondition::SourceIsBlocking
             | StaticCondition::SourceIsBlocked
+            | StaticCondition::SourceIsCommander
             | StaticCondition::IsMonarch { .. }
             | StaticCondition::IsInitiative
             | StaticCondition::NoMonarch

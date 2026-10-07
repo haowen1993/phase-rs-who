@@ -163,7 +163,43 @@ fn effect_candidate_ids(
     // pass cost O(identity effects x |battlefield|) just to discover one
     // recipient apiece.
     let candidates = if let Some(named) = filter_names_single_object(filter, source_id) {
-        if zones
+        // CR 400.1 + CR 604.3: when the named object IS the effect's own source
+        // (`SelfRef` — "this permanent's own characteristics"), its candidate
+        // universe is that object wherever it currently is, not merely wherever
+        // the filter's scan zones happen to point. Those zones are derived from
+        // the filter alone and default to the battlefield, which is the right
+        // default for a POPULATION filter ("creatures you control") but wrong
+        // here: a characteristic-defining ability functions in every zone
+        // (CR 604.3), so an admitted `SelfRef` CDA on a card outside the
+        // battlefield — Clara Oswald's "~ is the chosen color", read while she is
+        // still in the command zone — was silently dropped, leaving the effect
+        // with zero recipients.
+        //
+        // Deliberately NARROWED to `named == source_id`. A `SpecificObject`
+        // naming some OTHER object keeps the scan-zone gate, because that class
+        // is delivered by the off-zone authority
+        // (`off_zone_characteristics.rs`), not by this pass — pinned by
+        // `identity_shortcut_declines_for_a_predicate_and_spans_non_battlefield_zones`,
+        // whose graveyard-bound cross-object grant must NOT start landing here.
+        //
+        // Not a widening either way: the caller still runs every candidate
+        // through `matches_target_filter`, which applies its own zone rules, and
+        // the definition's zone-of-function gate was applied at gather time
+        // (`static_functions_in_zone`). A `SelfRef` whose source has left the
+        // game finds no object and yields nothing.
+        let self_is_the_named_object = named == source_id;
+        let mut named_zones: Vec<Zone> = if self_is_the_named_object {
+            state
+                .objects
+                .get(&named)
+                .map(|object| object.zone)
+                .into_iter()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        named_zones.extend(zones.iter().copied());
+        if named_zones
             .into_iter()
             .any(|zone| zone_cache.zone_contains(state, zone, named))
         {
@@ -1706,6 +1742,7 @@ fn static_condition_uses_object_population(condition: &StaticCondition) -> bool 
         | StaticCondition::RecipientAttackingOwnerTarget { .. }
         | StaticCondition::SourceIsBlocking
         | StaticCondition::SourceIsBlocked
+        | StaticCondition::SourceIsCommander
         | StaticCondition::IsMonarch { .. }
         | StaticCondition::IsInitiative
         | StaticCondition::NoMonarch
@@ -1864,6 +1901,7 @@ fn static_condition_characteristic_reads_at(
         | StaticCondition::RecipientAttackingOwnerTarget { .. }
         | StaticCondition::SourceIsBlocking
         | StaticCondition::SourceIsBlocked
+        | StaticCondition::SourceIsCommander
         | StaticCondition::IsMonarch { .. }
         | StaticCondition::IsInitiative
         | StaticCondition::NoMonarch
@@ -1994,6 +2032,7 @@ fn entered_object_perturbs_static_condition(
         | StaticCondition::RecipientAttackingOwnerTarget { .. }
         | StaticCondition::SourceIsBlocking
         | StaticCondition::SourceIsBlocked
+        | StaticCondition::SourceIsCommander
         | StaticCondition::IsMonarch { .. }
         | StaticCondition::IsInitiative
         | StaticCondition::NoMonarch
@@ -2344,6 +2383,14 @@ fn evaluate_condition_inner(
         // Callous Oppressor dying while tapped) fails this predicate and any
         // `ForAsLongAs { SourceIsTapped }` continuous effect (gain-control, etc.) ends.
         StaticCondition::SourceIsTapped => eval_source_is_tapped_on_battlefield(state, source_id),
+        // CR 903.3: True when the source card is a commander. The designation is
+        // an attribute of the card, set at deck construction and never cleared,
+        // so it holds in every zone — including the command zone, which is where
+        // Clara Oswald's "Impossible Girl" reads it.
+        StaticCondition::SourceIsCommander => state
+            .objects
+            .get(&source_id)
+            .is_some_and(|object| object.is_commander),
         // CR 311.2 / CR 901.7 / CR 701.31b: the source plane/phenomenon is face up
         // iff it is the active plane in the command zone. Planeswalking away turns
         // it face down and removes it from the command zone (CR 701.31b), so this
@@ -2538,6 +2585,12 @@ fn evaluate_condition_inner(
                     .first()
                     .is_some_and(|a| a.object_id == source_id)
         }),
+        // CR 903.3: True when the source card is a commander. The designation
+        // lives on the card (`GameObject::is_commander`, set at deck
+        // construction and never cleared) and holds in every zone — which is
+        // exactly what the motivating card needs, since Clara Oswald's
+        // "Impossible Girl" reads it while she is still in the command zone.
+
         // CR 508.1k: Source creature is currently an attacker.
         StaticCondition::SourceIsAttacking => eval_source_is_attacking(state, source_id),
         // CR 509.1g: Source creature is currently a blocker.
@@ -4508,6 +4561,7 @@ fn static_condition_reads_life(condition: &StaticCondition) -> bool {
         | StaticCondition::SourceIsAttacking
         | StaticCondition::SourceIsBlocking
         | StaticCondition::SourceIsBlocked
+        | StaticCondition::SourceIsCommander
         | StaticCondition::IsMonarch { .. }
         | StaticCondition::IsInitiative
         | StaticCondition::NoMonarch

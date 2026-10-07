@@ -282,6 +282,36 @@ pub(crate) fn bind_named_choice(
         return updated_context;
     }
     if let Some(source) = exact_object_source {
+        // CR 607.2p + CR 903.3: A color chosen for a CHARACTERISTIC-DEFINING
+        // ability BEFORE THE GAME BEGINS is a linked-ability choice whose
+        // reference "continues to refer to that choice as the object changes
+        // zones during the game". `chosen_attributes` cannot carry it —
+        // `reset_for_battlefield_entry` clears that list on every battlefield
+        // entry (CR 400.7), and the motivating card is a commander chosen while
+        // it is still in the command zone. Mirror the answer into the object's
+        // dedicated `commander_color_choice`, which `GameObject::chosen_color`
+        // reads first, so the whole chosen-color family resolves against it.
+        //
+        // Gated on the pregame drain (`resolving_begin_game_abilities`) AND on
+        // the chosen object being a commander, so an in-game color choice made
+        // by some other card can never write this field.
+        if state.resolving_begin_game_abilities && matches!(choice_type, ChoiceType::Color { .. }) {
+            let chosen = ChosenAttribute::from_choice(choice_type.clone(), choice);
+            let commander = source
+                .context
+                .as_ref()
+                .map(|context| context.identity.reference.object_id);
+            if let (Some(ChosenAttribute::Color(color)), Some(object_id)) = (chosen, commander) {
+                if let Some(object) = state.objects.get_mut(&object_id) {
+                    if object.is_commander {
+                        object.commander_color_choice = Some(color);
+                        // CR 613.1e: the color is a layer-5 characteristic — re-run
+                        // layers so the continuous effect reading it is applied.
+                        crate::game::layers::mark_layers_full(state);
+                    }
+                }
+            }
+        }
         // CR 608.2d: A multi-keyword choice (`ChoiceType::Keyword { count > 1 }`,
         // e.g. Greymond's "choose two abilities from among ...") arrives as one
         // comma-joined answer ("First Strike, Vigilance"). Split it on ',' and

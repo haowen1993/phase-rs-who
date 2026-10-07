@@ -567,8 +567,37 @@ fn validate_bottom_selection(
     Ok(())
 }
 
-/// Queue all BeginGame abilities for cards in each player's opening hand.
+/// CR 103.6 + CR 903.6: Queue every `BeginGame` ability for each player, from
+/// BOTH zones such a card can be in before the first turn.
+///
+///   * the OPENING HAND — CR 103.6's "if this card is in your opening hand, you
+///     may begin the game with it on the battlefield" (the Leyline class), and
+///     CR 103.5b's mulligan-time abilities' pregame siblings;
+///   * the COMMAND ZONE — CR 903.6 puts each commander there at the start of the
+///     game, which is where a commander's own pregame ability has to be found.
+///     Clara Oswald's "Impossible Girl" is the motivating card: it asks for a
+///     color before the game begins while Clara is still in the command zone, so
+///     a hand-only scan could never see it.
+///
+/// Hand first, then command zone, per player, so a player's own pregame prompts
+/// arrive in printed-priority order regardless of which zone each came from. The
+/// whole list is reversed because the drain pops from the back.
 fn queue_begin_game_abilities(state: &mut GameState) {
+    let sources = |player: &crate::types::player::Player| {
+        player
+            .hand
+            .iter()
+            .copied()
+            .chain(
+                state
+                    .command_zone
+                    .iter()
+                    .copied()
+                    .filter(|id| state.objects.get(id).is_some_and(|o| o.owner == player.id)),
+            )
+            .collect::<Vec<_>>()
+    };
+
     let mut begin_game: Vec<PendingBeginGameAbility> = state
         .seat_order
         .clone()
@@ -579,10 +608,9 @@ fn queue_begin_game_abilities(state: &mut GameState) {
                 .iter()
                 .find(|p| p.id == player_id)
                 .expect("player exists");
-            player
-                .hand
-                .iter()
-                .filter_map(|&obj_id| {
+            sources(player)
+                .into_iter()
+                .filter_map(|obj_id| {
                     let obj = state.objects.get(&obj_id)?;
                     let ability = obj
                         .abilities
@@ -730,7 +758,7 @@ mod tests {
     /// Test helper: decide for `player`, advancing `state.waiting_for` in place.
     /// Mirrors the engine dispatch contract: callers must update `state.waiting_for`
     /// from the returned WaitingFor before the next call.
-    fn decide(
+    pub(super) fn decide(
         state: &mut GameState,
         player: PlayerId,
         keep: bool,
@@ -786,7 +814,7 @@ mod tests {
         Ok(wf)
     }
 
-    fn setup_with_libraries(cards_per_player: usize) -> GameState {
+    pub(super) fn setup_with_libraries(cards_per_player: usize) -> GameState {
         setup_n_player_with_libraries(2, cards_per_player)
     }
 
@@ -2214,5 +2242,202 @@ mod tests {
             "remaining players should complete the flow after P0's concession, got {:?}",
             waiting
         );
+    }
+}
+
+#[cfg(test)]
+mod pregame_color_choice_tests {
+    use super::tests::{decide, setup_with_libraries};
+    use super::*;
+    use crate::types::ability::{
+        AbilityDefinition, ChoiceType, ColorChangeMode, ContinuousModification, Effect,
+        StaticCondition, StaticDefinition, TargetFilter, TargetSelectionMode,
+    };
+    use crate::types::actions::GameAction;
+    use crate::types::mana::ManaColor;
+
+    /// CR 607.2p: install both halves of the linked pair on a card, the way the
+    /// parser emits them from Clara Oswald's one printed paragraph.
+    fn install_impossible_girl(state: &mut GameState, card: ObjectId) {
+        let choose = AbilityDefinition::new(
+            AbilityKind::BeginGame,
+            Effect::Choose {
+                choice_type: ChoiceType::Color {
+                    excluded: Vec::new(),
+                },
+                // Matches what the parser emits for Clara Oswald — `persist: true`
+                // is what makes `named_choice_authority` build the exact-object
+                // source the answer is recorded against.
+                persist: true,
+                selection: TargetSelectionMode::Chosen,
+            },
+        );
+        let object = state.objects.get_mut(&card).expect("card exists");
+        std::sync::Arc::make_mut(&mut object.abilities).push(choose);
+        object.static_definitions.push(
+            StaticDefinition::continuous()
+                .affected(TargetFilter::SelfRef)
+                .modifications(vec![ContinuousModification::AddChosenColor {
+                    mode: ColorChangeMode::Set,
+                }])
+                .condition(StaticCondition::SourceIsCommander)
+                .cda(),
+        );
+    }
+
+    /// Move a card from its owner's hand into the command zone and mark it a
+    /// commander, mirroring CR 903.6 (the commander is there before the first
+    /// turn, which is why a hand-only pregame scan cannot find it).
+    fn make_commander(state: &mut GameState, player: PlayerId, card: ObjectId) {
+        state
+            .players
+            .iter_mut()
+            .find(|p| p.id == player)
+            .expect("player exists")
+            .hand
+            .retain(|id| *id != card);
+        let object = state.objects.get_mut(&card).expect("card exists");
+        object.zone = Zone::Command;
+        object.is_commander = true;
+        state.command_zone.push_back(card);
+    }
+
+    /// CR 607.2p + CR 903.6: the pregame color choice is offered from the COMMAND
+    /// ZONE (not the opening hand), the answer is recorded on the object, and the
+    /// characteristic-defining half makes the commander that color.
+    #[test]
+    fn commander_pregame_color_choice_is_offered_and_applied() {
+        let mut state = setup_with_libraries(20);
+        let mut events = Vec::new();
+        state.waiting_for = start_mulligan(&mut state, &mut events);
+
+        let clara = state.players[0].hand[0];
+        make_commander(&mut state, PlayerId(0), clara);
+        install_impossible_girl(&mut state, clara);
+
+        // Reach guard: the choice is still unset before the pregame drain runs.
+        assert_eq!(state.objects[&clara].commander_color_choice, None);
+        assert!(
+            !state.objects[&clara].color.contains(&ManaColor::Red),
+            "reach guard: the commander must not already be red"
+        );
+
+        decide(&mut state, PlayerId(0), true, &mut events);
+        decide(&mut state, PlayerId(1), true, &mut events);
+
+        let WaitingFor::NamedChoice {
+            player,
+            choice_type,
+            options,
+            source,
+            ..
+        } = state.waiting_for.clone()
+        else {
+            panic!(
+                "the commander's pregame color choice must be offered, got {:?}",
+                state.waiting_for
+            );
+        };
+        assert_eq!(player, PlayerId(0));
+        assert!(matches!(choice_type, ChoiceType::Color { .. }));
+        assert_eq!(
+            options.len(),
+            5,
+            "CR 105.1: five colors are the legal choices"
+        );
+        assert!(
+            source
+                .as_ref()
+                .and_then(|s| s.context.as_ref())
+                .is_some_and(|context| context.identity.reference.object_id == clara),
+            "the choice must be bound to the commander in the command zone"
+        );
+
+        let result = crate::game::engine::apply(
+            &mut state,
+            PlayerId(0),
+            GameAction::ChooseOption {
+                choice: "Red".to_string(),
+            },
+        )
+        .expect("choosing a color before the game begins must be legal");
+
+        assert_eq!(
+            state.objects[&clara].commander_color_choice,
+            Some(ManaColor::Red),
+            "CR 607.2p: the pregame choice is recorded on the card"
+        );
+        assert!(
+            state.objects[&clara].color.contains(&ManaColor::Red),
+            "the characteristic-defining half must make the commander red, got {:?}",
+            state.objects[&clara].color
+        );
+        assert!(
+            matches!(result.waiting_for, WaitingFor::Priority { .. }),
+            "the pregame drain must settle to priority, got {:?}",
+            result.waiting_for
+        );
+    }
+
+    /// CR 400.7 + CR 607.2p: the choice SURVIVES a zone change. This is the
+    /// reason the answer lives in a dedicated field rather than
+    /// `chosen_attributes`, which `reset_for_battlefield_entry` clears.
+    #[test]
+    fn the_pregame_color_choice_survives_battlefield_entry() {
+        let mut state = setup_with_libraries(20);
+        let mut events = Vec::new();
+        state.waiting_for = start_mulligan(&mut state, &mut events);
+
+        let clara = state.players[0].hand[0];
+        make_commander(&mut state, PlayerId(0), clara);
+        install_impossible_girl(&mut state, clara);
+
+        decide(&mut state, PlayerId(0), true, &mut events);
+        decide(&mut state, PlayerId(1), true, &mut events);
+        crate::game::engine::apply(
+            &mut state,
+            PlayerId(0),
+            GameAction::ChooseOption {
+                choice: "Green".to_string(),
+            },
+        )
+        .expect("choosing a color must be legal");
+
+        // Simulate the commander resolving onto the battlefield: this is the
+        // reset that clears `chosen_attributes`.
+        {
+            let object = state.objects.get_mut(&clara).expect("card exists");
+            object.zone = Zone::Battlefield;
+            object.reset_for_battlefield_entry(1, 1);
+        }
+
+        assert_eq!(
+            state.objects[&clara].commander_color_choice,
+            Some(ManaColor::Green),
+            "CR 607.2p: the choice must survive the zone change"
+        );
+        assert_eq!(
+            state.objects[&clara].chosen_color(),
+            Some(ManaColor::Green),
+            "the chosen-color accessor must still answer after the reset"
+        );
+    }
+
+    /// The pregame drain is a no-op when no card carries a `BeginGame` ability —
+    /// the bypass every existing game takes.
+    #[test]
+    fn no_begin_game_ability_leaves_the_pregame_flow_unchanged() {
+        let mut state = setup_with_libraries(20);
+        let mut events = Vec::new();
+        state.waiting_for = start_mulligan(&mut state, &mut events);
+
+        decide(&mut state, PlayerId(0), true, &mut events);
+        let waiting = decide(&mut state, PlayerId(1), true, &mut events);
+
+        assert!(
+            matches!(waiting, WaitingFor::Priority { .. }),
+            "with no pregame ability the game must start straight away, got {waiting:?}"
+        );
+        assert!(!state.resolving_begin_game_abilities);
     }
 }

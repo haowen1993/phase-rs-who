@@ -227,6 +227,9 @@ fn static_condition_to_restriction_condition(
     condition: StaticCondition,
 ) -> Option<ParsedCondition> {
     match condition {
+        // CR 903.3: produced by the dedicated pregame recognizer, never by text —
+        // there is no surface phrasing for this converter to round-trip.
+        StaticCondition::SourceIsCommander => None,
         // ---- Exactly representable -------------------------------------------------
         StaticCondition::QuantityComparison {
             lhs,

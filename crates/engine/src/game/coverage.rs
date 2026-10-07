@@ -5028,6 +5028,7 @@ fn fmt_static_condition(cond: &StaticCondition) -> String {
         SC::SourceIsAttacking => "source is attacking".into(),
         SC::SourceIsBlocking => "source is blocking".into(),
         SC::SourceIsBlocked => "source is blocked".into(),
+        SC::SourceIsCommander => "source is a commander".into(),
         // CR 725.1 + CR 109.5: see the `TC::IsMonarch` arm above.
         SC::IsMonarch {
             player: PlayerScope::Controller,
@@ -10225,6 +10226,9 @@ fn static_condition_feature(cond: &StaticCondition) -> (&'static str, FeatureSup
             ("SharesColorWithMostCommonColorAmongPermanents", Handled)
         }
         StaticCondition::SourceEnteredThisTurn => ("SourceEnteredThisTurn", Handled),
+        // CR 903.3: evaluated at `layers.rs::evaluate_condition_inner` against
+        // `GameObject::is_commander`; no dependency on a dirty-tracked family.
+        StaticCondition::SourceIsCommander => ("SourceIsCommander", Handled),
         StaticCondition::SourceHasDealtDamage => ("SourceHasDealtDamage", Handled),
         StaticCondition::WasCast { .. } => ("WasCast", Handled),
         StaticCondition::IsRingBearer => ("IsRingBearer", Handled),

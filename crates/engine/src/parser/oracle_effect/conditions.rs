@@ -5859,6 +5859,9 @@ pub(crate) fn static_condition_to_ability_condition(
     ctx: &mut ParseContext,
 ) -> Option<AbilityCondition> {
     match sc {
+        // CR 903.3: produced by the dedicated pregame recognizer, never by text —
+        // there is no surface phrasing for this converter to round-trip.
+        StaticCondition::SourceIsCommander => None,
         StaticCondition::DuringYourTurn => Some(AbilityCondition::IsYourTurn),
         StaticCondition::QuantityComparison {
             lhs,

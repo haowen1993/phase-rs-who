@@ -707,6 +707,103 @@ fn parse_begin_game_clause(line: &str, lower: &str) -> Option<AbilityDefinition>
     Some(def)
 }
 
+/// CR 607.2p + CR 903.3: Recognize the "choose a color before the game begins"
+/// characteristic-defining pair — "If ~ is your commander, choose a color
+/// before the game begins. ~ is the chosen color." (Clara Oswald, "Impossible
+/// Girl").
+///
+/// One printed paragraph, TWO abilities, and the rules make them a LINKED pair
+/// (CR 607.2p): the first causes the pregame choice, the second is the
+/// characteristic-defining ability that reads it, and "the second ability refers
+/// only to the choice made as a result of the first ability and continues to
+/// refer to that choice as the object changes zones during the game".
+///
+/// So this recognizer emits both, in printed order:
+///
+///   1. a `AbilityKind::BeginGame` ability whose effect is
+///      `Effect::Choose { ChoiceType::Color }`. It is NOT a triggered or
+///      activated ability — CR 903.3a's class of abilities "functions before the
+///      game begins" — so it joins the existing pregame drain
+///      (`mulligan::resume_begin_game_abilities`) rather than the stack. Its
+///      answer is written to `GameObject::commander_color_choice` by the
+///      `Choose` resolver, which is the ONE place that can write a value that
+///      must survive zone changes (`chosen_attributes` is cleared per
+///      battlefield entry, CR 400.7 — see that field's doc).
+///   2. a characteristic-defining static (`StaticDefinition::cda`, CR 604.3)
+///      gated on `StaticCondition::SourceIsCommander`, applying
+///      `ContinuousModification::AddChosenColor { mode: Set }` to the source.
+///      `Set` is CR 105.3's default: "~ is the chosen color" replaces the
+///      printed colors rather than adding to them, which is what makes Clara
+///      colorless-or-chosen rather than always-five-color for identity purposes.
+///
+/// The commander gate is matched as text rather than inferred, so the class this
+/// covers is exactly "a pregame color choice whose reader is conditioned on
+/// being your commander". A future "... is your commander, choose a color before
+/// the game begins" card with a different reader needs its own recognizer rather
+/// than a silently-wrong reuse of this one.
+///
+/// `persist: true` is required, and the reason is structural rather than about
+/// where the answer ends up: `named_choice_authority` only builds the
+/// `NamedChoiceSource` (and the `ExactObjectAndResolution` binding the answer
+/// path keys on) when the choice both persists and names an exact source. A
+/// `persist: false` color prompt arrives with `source: None`, so the choice
+/// handler has no source object to record anything against — the durable write
+/// this card needs could not happen at all. Persisting also gives the ordinary
+/// `chosen_attributes` record, and `GameObject::chosen_color` reads the durable
+/// commander field FIRST, so the two can never disagree in practice.
+fn try_parse_pregame_color_choice_cda(
+    line: &str,
+    lower: &str,
+) -> Option<(AbilityDefinition, StaticDefinition)> {
+    // Preamble: "[ability word — ]if ~ is your commander, choose a color before
+    // the game begins. ~ is the chosen color."
+    let (_, tail) = nom_on_lower(line, lower, |input| {
+        let (input, _) = opt((take_until::<_, _, OracleError<'_>>("—"), tag("— "))).parse(input)?;
+        let (input, _) = alt((
+            tag("if ~ is your commander, "),
+            tag("if this card is your commander, "),
+            tag("if this creature is your commander, "),
+        ))
+        .parse(input)?;
+        let (input, _) = tag("choose a color before the game begins. ").parse(input)?;
+        let (input, _) = alt((
+            tag("~ is the chosen color"),
+            tag("this card is the chosen color"),
+        ))
+        .parse(input)?;
+        let (input, _) = opt(tag(".")).parse(input)?;
+        Ok((input, ()))
+    })?;
+    // Nothing may follow: a trailing sentence is a different ability, and this
+    // recognizer would be dropping it.
+    if !tail.trim().is_empty() {
+        return None;
+    }
+
+    let choose = AbilityDefinition::new(
+        AbilityKind::BeginGame,
+        Effect::Choose {
+            choice_type: ChoiceType::Color {
+                excluded: Vec::new(),
+            },
+            persist: true,
+            selection: crate::types::ability::TargetSelectionMode::Chosen,
+        },
+    )
+    .description(line.to_string());
+
+    let static_def = StaticDefinition::continuous()
+        .affected(TargetFilter::SelfRef)
+        .modifications(vec![ContinuousModification::AddChosenColor {
+            mode: crate::types::ability::ColorChangeMode::Set,
+        }])
+        .condition(StaticCondition::SourceIsCommander)
+        .cda()
+        .description(line.to_string());
+
+    Some((choose, static_def))
+}
+
 /// Parse the "with [N] [type] counter(s) on it" sub-clause of a begin-game line.
 ///
 /// CR 122.1: counters placed on the permanent as it enters. The count defaults
@@ -7441,6 +7538,23 @@ fn parse_normalized_oracle_ir(
         // `effects/mod.rs`. Runtime dispatch lives in `mulligan.rs`.
         if let Some(ir) = try_parse_mulligan_time_ability(&line, &lower) {
             emitter.ability_ir_at(item_line, ir);
+            i += 1;
+            continue;
+        }
+
+        // CR 607.2p + CR 903.3: "If ~ is your commander, choose a color before
+        // the game begins. ~ is the chosen color." (Clara Oswald, "Impossible
+        // Girl"). Run BEFORE the begin-game recognizer below — both are
+        // pregame-ability recognizers, and only this one matches a line whose
+        // preamble is "if ~ is your commander" rather than "if this card is in
+        // your opening hand", so their input shapes are disjoint.
+        //
+        // Two abilities come out of one printed paragraph (CR 607.2p makes them
+        // a linked pair), so the static half is emitted through the static node
+        // at the same source position, immediately after the choice half.
+        if let Some((choice, cda)) = try_parse_pregame_color_choice_cda(&line, &lower) {
+            emitter.ability_at(item_line, choice);
+            emitter.static_ir_at(item_line, StaticIr::from_definition(&line, cda));
             i += 1;
             continue;
         }

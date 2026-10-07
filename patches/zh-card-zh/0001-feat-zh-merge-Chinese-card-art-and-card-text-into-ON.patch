@@ -1,73 +1,67 @@
-From c24f02382df04f72a75a9097e2284d1ceb844ed4 Mon Sep 17 00:00:00 2001
+From 601ff4f2c2318428a5982d733f245d08749017e3 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
-Date: Wed, 7 Oct 2026 19:31:03 +0800
-Subject: [PATCH 09/10] refactor(art): drop the availability table and let
- Chinese art follow the interface language
+Date: Wed, 7 Oct 2026 21:30:44 +0800
+Subject: [PATCH] feat(zh): merge Chinese card art and card text into ONE
+ localization series
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-The final state of the card-art series, on top of the commits that built it.
+They were two series and could not be stacked. Every reason came down to the same
+thing: the split was artificial. Both halves write the SAME files —
+`preferencesStore.ts`, `PreferencesModal.tsx`, and the `settings.json` catalogs —
+so as separate series each carried half a change to a shared file and they
+conflicted no matter which order they were applied in.
 
-**The availability table is gone.** The rewrite to the CDN is unconditional and
-keeps the printing id it was handed, so nothing chooses a printing and there is
-nothing to look up: `images.mtgch.com` answers 404 for printings it has no art for
-and the existing rung ladder falls to that CDN's English mirror. Removed with it:
-`gen-derived-art-availability.sh`, its two Python helpers, the
-`__SCRYFALL_IMAGES_AVAILABILITY_URL_TEMPLATE__` define, and the generated sidecar.
+They are one feature: "the game is in Chinese". Card art and card text are two
+surfaces of it, not two capabilities, and the player reaches both through one
+control (the interface language, which `artLanguage: "auto"` follows). One series,
+one application, no conflict.
 
-**Chinese card art now follows the INTERFACE language.** `artLanguage` goes back to
-`"auto"`, and `zhs` joins `SUPPORTED_LNGS` so a player can actually choose Chinese.
-Every browser `zh*` tag normalizes to it — the app serves ONE Chinese, simplified,
-so traditional tags map there too rather than falling back.
-
-Pinning the ART preference to Chinese was reaching the same goal the hard way: it
-produced two independent Chinese switches that had to agree, plus a persistence
-helper whose only job was stopping an old preferences blob from reverting one of
-them. Following the interface needs neither, and it is what `"auto"` has always
-meant.
-
-The `zhs` catalogs mirror English for now — translation is deferred — but they
-exist and carry en's exact key set, because i18next needs a namespace to resolve
-and the locale-parity gate compares key sets. Placeholders keep that gate honest
-instead of exempting the new locale from it.
-
-Also carries the two fixes for defects the series had been shipping:
-`resolvePrintingFallback` was deleted along with the availability block while its
-call site remained (every placeholder-image card threw), and this rebuild strips
-the card-TEXT series' fragments that had leaked into the shared files
-(`preferencesStore`, `PreferencesModal`, the `settings.json` catalogs), which is
-what made the series unreapplicable.
+This is the engine base plus the localization content, so applying it produces a
+complete Chinese install. The engine support remains its own series and is applied
+first; only `client/` and the card-text generator are touched here.
 ---
+ client/node_modules                           |    1 +
+ .../GameCardPreview.imageLifecycle.test.tsx   |    4 +
  .../__tests__/PrintingPickerModal.test.tsx    |    6 +
- .../components/settings/PreferencesModal.tsx  |    2 +
- .../src/hooks/__tests__/useCardImage.test.tsx |   45 +
+ .../components/settings/PreferencesModal.tsx  |   18 +-
+ client/src/components/ui/LanguageFlag.tsx     |   26 +
+ .../src/hooks/__tests__/useCardImage.test.tsx |  109 +-
+ client/src/hooks/useCardImage.ts              |   95 +-
+ client/src/hooks/useEngineCardData.ts         |   57 +-
  .../src/i18n/__tests__/localeParity.test.ts   |    1 +
+ client/src/i18n/locales/de/settings.json      |   24 +-
+ client/src/i18n/locales/en/settings.json      |   24 +-
+ client/src/i18n/locales/es/settings.json      |   24 +-
+ client/src/i18n/locales/fr/settings.json      |   24 +-
+ client/src/i18n/locales/it/settings.json      |   24 +-
+ client/src/i18n/locales/ja/settings.json      |   24 +-
+ client/src/i18n/locales/pl/settings.json      |   24 +-
+ client/src/i18n/locales/pt/settings.json      |   24 +-
  client/src/i18n/locales/zhs/common.json       |  448 +++
  client/src/i18n/locales/zhs/deck-builder.json |  303 ++
  client/src/i18n/locales/zhs/draft.json        |  800 +++++
- client/src/i18n/locales/zhs/game.json         | 2647 +++++++++++++++++
+ client/src/i18n/locales/zhs/game.json         | 2645 +++++++++++++++++
  client/src/i18n/locales/zhs/menu.json         |  368 +++
  client/src/i18n/locales/zhs/multiplayer.json  |  355 +++
  client/src/i18n/locales/zhs/replay.json       |   26 +
- client/src/i18n/locales/zhs/settings.json     |  547 ++++
+ client/src/i18n/locales/zhs/settings.json     |  549 ++++
  client/src/i18n/locales/zhs/tournament.json   |  156 +
  client/src/i18n/resources.test.ts             |    8 +-
  client/src/i18n/resources.ts                  |   17 +-
- .../src/services/__tests__/scryfall.test.ts   |   27 +-
+ .../src/services/__tests__/scryfall.test.ts   |  526 ++++
+ client/src/services/cardArtLocale.ts          |   54 +
+ client/src/services/cardTextLocale.ts         |   91 +
  client/src/services/engineRuntime.ts          |   35 +
- client/src/services/scryfall.ts               |   19 +
- .../stores/__tests__/preferencesStore.test.ts |   20 +-
- .../test/fixtures/keyword-payload-wire.json   |   13 +-
- .../viewmodel/__tests__/keywordProps.test.ts  |   26 +
- client/src/viewmodel/keywordProps.ts          |   33 +-
- client/src/vite-env.d.ts                      |    1 -
- client/src/wasm/engine_wasm.d.ts              |    5 +-
- client/vite.config.ts                         |   10 -
- client/vitest.config.ts                       |    1 -
- scripts/check-card-data-compat.mjs            |  102 +
- scripts/gen-card-data.sh                      |   27 +
- 28 files changed, 6012 insertions(+), 36 deletions(-)
+ client/src/services/scryfall.ts               |  261 +-
+ .../__tests__/candidateKeys.test.ts           |   41 +
+ client/src/services/visualPacks/types.ts      |    9 +-
+ .../stores/__tests__/preferencesStore.test.ts |    6 +-
+ client/src/stores/preferencesStore.ts         |   82 +
+ scripts/gen-zhs-card-text.mjs                 |  422 +++
+ 38 files changed, 7634 insertions(+), 77 deletions(-)
+ create mode 120000 client/node_modules
  create mode 100644 client/src/i18n/locales/zhs/common.json
  create mode 100644 client/src/i18n/locales/zhs/deck-builder.json
  create mode 100644 client/src/i18n/locales/zhs/draft.json
@@ -77,8 +71,33 @@ what made the series unreapplicable.
  create mode 100644 client/src/i18n/locales/zhs/replay.json
  create mode 100644 client/src/i18n/locales/zhs/settings.json
  create mode 100644 client/src/i18n/locales/zhs/tournament.json
- create mode 100644 scripts/check-card-data-compat.mjs
+ create mode 100644 client/src/services/cardArtLocale.ts
+ create mode 100644 client/src/services/cardTextLocale.ts
+ create mode 100644 scripts/gen-zhs-card-text.mjs
 
+diff --git a/client/node_modules b/client/node_modules
+new file mode 120000
+index 000000000..7ba10ae67
+--- /dev/null
++++ b/client/node_modules
+@@ -0,0 +1 @@
++/Users/mouhaowen/phase-rs-who/client/node_modules
+\ No newline at end of file
+diff --git a/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx b/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx
+index 4add61a6d..aefd7136c 100644
+--- a/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx
++++ b/client/src/components/card/__tests__/GameCardPreview.imageLifecycle.test.tsx
+@@ -76,6 +76,10 @@ vi.mock("../../../services/scryfall.ts", () => ({
+   isCardImageRotatedSync: vi.fn(() => false),
+   isLocaleArtReady: vi.fn(() => true),
+   loadLocaleArt: vi.fn().mockResolvedValue(undefined),
++  // No derived art locale is active in these tests, so the ladder contributes
++  // no extra rung — the hook's own behaviour is what is under test here.
++  assetFallbackSources: vi.fn(() => []),
++  derivedArtFallbackUrl: vi.fn(() => undefined),
+   resolveFaceIndexSync: vi.fn(() => null),
+   resolveOracleIdSync: vi.fn(() => null),
+   resolvePrintingImageUrl: vi.fn(),
 diff --git a/client/src/components/deck-builder/__tests__/PrintingPickerModal.test.tsx b/client/src/components/deck-builder/__tests__/PrintingPickerModal.test.tsx
 index cd07b2f3e..04f3eab7b 100644
 --- a/client/src/components/deck-builder/__tests__/PrintingPickerModal.test.tsx
@@ -101,30 +120,185 @@ index cd07b2f3e..04f3eab7b 100644
      // Hold the locale map in flight so the modal is forced through the state
      // this test exists for: mounted, localized language, no map yet.
 diff --git a/client/src/components/settings/PreferencesModal.tsx b/client/src/components/settings/PreferencesModal.tsx
-index a0972e426..e9755a792 100644
+index c51fbbabe..a93721983 100644
 --- a/client/src/components/settings/PreferencesModal.tsx
 +++ b/client/src/components/settings/PreferencesModal.tsx
-@@ -112,6 +112,7 @@ const ART_LANGUAGE_LABELS: Record<ArtLanguage, string> = {
-   zhs: "简体中文",
- };
+@@ -31,7 +31,6 @@ import {
+   PACING_MAX,
+   PACING_MIN,
+   PACING_STEP,
+-  type CardAnimationStyle,
+   type PacingCategory,
+   type VfxQuality,
+ } from "../../animation/types.ts";
+@@ -49,6 +48,7 @@ import type { SupportedLng } from "../../i18n/resources.ts";
+ import { LanguageFlag } from "../ui/LanguageFlag.tsx";
+ import { BATTLEFIELDS } from "../board/battlefields.ts";
+ import { PLAIN_BACKGROUNDS } from "../board/plainBackgrounds.ts";
++import { CardAnimationStylePicker } from "./CardAnimationStylePicker.tsx";
+ import { ConfirmDialog } from "../ui/ConfirmDialog.tsx";
+ import { ModalPanelShell } from "../ui/ModalPanelShell";
+ import { MenuSelect } from "../ui/MenuSelect";
+@@ -76,6 +76,13 @@ interface PreferencesModalProps {
+ /** Locale options for the language selector. Labels are autonyms (each language's
+  *  own name) and are intentionally NOT translated. */
+ const LANGUAGE_OPTIONS: { value: SupportedLng; label: string }[] = [
++  // Chinese leads the list in this fork. Ordering is presentation only — it does
++  // not change what any value resolves to.
++  //
++  // Labelled `中文` rather than `简体中文`: the app ships one Chinese, simplified,
++  // and every `zh*` browser tag maps to it, so naming the script would imply an
++  // alternative that does not exist.
++  { value: "zhs", label: "中文" },
+   { value: "en", label: "English" },
+   { value: "es", label: "Español" },
+   { value: "fr", label: "Français" },
+@@ -86,6 +93,7 @@ const LANGUAGE_OPTIONS: { value: SupportedLng; label: string }[] = [
+   { value: "ja", label: "日本語" },
+ ];
  
 +
  const CARD_SIZES: CardSizePreference[] = ["small", "medium", "large"];
  const COMMAND_ZONE_DISPLAYS: CommandZoneDisplay[] = ["auto", "inline", "compact"];
  const ZONE_COLLAPSE_MODES: ZoneCollapseMode[] = ["auto", "on", "off"];
-@@ -437,6 +438,7 @@ export function PreferencesModal({
-                     />
+@@ -94,7 +102,6 @@ const DRAFT_CARD_PREVIEW_MODES: DraftCardPreviewMode[] = ["none", ...CARD_PREVIE
+ const DRAFT_DOUBLE_CLICK_CONFIRM_PICK_OPTIONS: Array<"disabled" | "enabled"> = ["disabled", "enabled"];
+ const SPELL_PAYMENT_MODES: SpellPaymentMode[] = ["auto", "autoExceptSacrificialMana", "manual"];
+ const VFX_QUALITIES: VfxQuality[] = ["full", "reduced", "minimal"];
+-const CARD_ANIMATION_STYLES: CardAnimationStyle[] = ["webgl", "classic"];
+ const MULTIPLAYER_BOARD_LAYOUTS: MultiplayerBoardLayout[] = ["auto", "focused", "split"];
+ 
+ /** Format a speed value as a user-facing label. The slider goes 0→max where
+@@ -554,12 +561,7 @@ export function PreferencesModal({
                    </SettingGroup>
  
+                   <SettingGroup label={t("visual.cardAnimationStyle")}>
+-                    <SegmentedControl
+-                      options={CARD_ANIMATION_STYLES}
+-                      value={cardAnimationStyle}
+-                      onChange={setCardAnimationStyle}
+-                      renderLabel={(opt) => t(`visual.cardAnimationStyleOptions.${opt}`)}
+-                    />
++                    <CardAnimationStylePicker value={cardAnimationStyle} onChange={setCardAnimationStyle} />
+                   </SettingGroup>
+ 
+                   <SettingGroup label={t("visual.keywordStrip")}>
+diff --git a/client/src/components/ui/LanguageFlag.tsx b/client/src/components/ui/LanguageFlag.tsx
+index b6445e446..0cef08d38 100644
+--- a/client/src/components/ui/LanguageFlag.tsx
++++ b/client/src/components/ui/LanguageFlag.tsx
+@@ -111,6 +111,30 @@ function FlagJA({ className }: { className?: string }) {
+   );
+ }
+ 
++function FlagZHS({ className }: { className?: string }) {
++  // Simplified Five-Star Red Flag. Four small stars sit in the canton, each
++  // rotated toward the large one; at chip size the rotation reads as a star, so
++  // they are drawn upright with the correct offsets rather than transformed.
++  const star = (cx: number, cy: number, r: number, key: string) => {
++    const points = Array.from({ length: 10 }, (_, i) => {
++      const radius = i % 2 === 0 ? r : r * 0.382;
++      const angle = (Math.PI / 5) * i - Math.PI / 2;
++      return `${cx + radius * Math.cos(angle)},${cy + radius * Math.sin(angle)}`;
++    }).join(" ");
++    return <polygon key={key} points={points} fill="#FFDE00" />;
++  };
++  return (
++    <svg viewBox={VIEW_BOX} className={className} aria-hidden="true">
++      <rect width="60" height="40" fill="#DE2910" />
++      {star(10, 10, 6, "big")}
++      {star(19, 4, 2, "s1")}
++      {star(23, 8, 2, "s2")}
++      {star(23, 14, 2, "s3")}
++      {star(19, 18, 2, "s4")}
++    </svg>
++  );
++}
 +
-                   <SettingGroup label={t("gameplay.cardSize")}>
-                     <SegmentedControl
-                       options={CARD_SIZES}
+ export function LanguageFlag({ lng, className }: { lng: SupportedLng; className?: string }) {
+   // Keep in sync with SupportedLng.
+   switch (lng) {
+@@ -130,5 +154,7 @@ export function LanguageFlag({ lng, className }: { lng: SupportedLng; className?
+       return <FlagPL className={className} />;
+     case "ja":
+       return <FlagJA className={className} />;
++    case "zhs":
++      return <FlagZHS className={className} />;
+   }
+ }
 diff --git a/client/src/hooks/__tests__/useCardImage.test.tsx b/client/src/hooks/__tests__/useCardImage.test.tsx
-index a5710c87b..074352176 100644
+index 7bb74c890..074352176 100644
 --- a/client/src/hooks/__tests__/useCardImage.test.tsx
 +++ b/client/src/hooks/__tests__/useCardImage.test.tsx
-@@ -794,6 +794,11 @@ describe("useCardImage", () => {
+@@ -33,7 +33,10 @@ function mockNoRemoteScryfall(resolveFaceIndexSync: (...args: unknown[]) => numb
+     isCardImageRotatedSync: vi.fn(() => false),
+     isLocaleArtReady: vi.fn(() => true),
+     loadLocaleArt: remoteWork,
+-    resolveFaceIndexSync,
++    assetFallbackSources: (src: string, fallbackSrc?: string) =>
++      fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++    derivedArtFallbackUrl: vi.fn(() => undefined),
++        resolveFaceIndexSync,
+     resolveOracleIdSync: vi.fn(() => null),
+     resolvePrintingImageUrl: vi.fn(),
+   }));
+@@ -110,7 +113,10 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn(() => false),
+       isLocaleArtReady: vi.fn(() => true),
+       loadLocaleArt: vi.fn(),
+-      resolveFaceIndexSync: vi.fn(() => null),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
++            resolveFaceIndexSync: vi.fn(() => null),
+       resolveOracleIdSync: vi.fn(() => null),
+       resolvePrintingImageUrl: vi.fn((printing) => printing.faces[0].normal),
+     }));
+@@ -173,7 +179,10 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn(() => false),
+       isLocaleArtReady: vi.fn(() => true),
+       loadLocaleArt: vi.fn(),
+-      resolveFaceIndexSync: vi.fn(() => null),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
++            resolveFaceIndexSync: vi.fn(() => null),
+       resolveOracleIdSync: vi.fn(() => null),
+       resolvePrintingImageUrl: vi.fn((printing) => printing.faces[0].normal),
+     }));
+@@ -428,6 +437,9 @@ describe("useCardImage", () => {
+       // localization.
+       isLocaleArtReady: vi.fn().mockReturnValue(true),
+       loadLocaleArt: vi.fn().mockResolvedValue(new Map()),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
+       resolveFaceIndexSync: vi.fn().mockReturnValue(null),
+       resolveOracleIdSync: vi.fn().mockReturnValue(null),
+       resolvePrintingImageUrl: vi.fn(),
+@@ -487,7 +499,10 @@ describe("useCardImage", () => {
+       // reported ready so the background loader never runs here.
+       isLocaleArtReady: vi.fn().mockReturnValue(true),
+       loadLocaleArt: vi.fn().mockResolvedValue(new Map()),
+-      pickOldestPrinting: vi.fn(),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
++            pickOldestPrinting: vi.fn(),
+       resolveFaceIndexSync: vi.fn().mockReturnValue(null),
+       resolveOracleIdSync: vi.fn().mockReturnValue(null),
+       resolvePrintingImageUrl: vi.fn(),
+@@ -586,6 +601,9 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn().mockReturnValue(false),
+       isLocaleArtReady: vi.fn().mockReturnValue(true),
+       loadLocaleArt: vi.fn().mockResolvedValue(new Map()),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
+       resolveFaceIndexSync: vi.fn().mockReturnValue(null),
+       resolveOracleIdSync: vi.fn().mockReturnValue(null),
+       resolvePrintingImageUrl: vi.fn(),
+@@ -776,6 +794,11 @@ describe("useCardImage", () => {
      }));
  
      const { useCardImage } = await import("../useCardImage");
@@ -136,7 +310,18 @@ index a5710c87b..074352176 100644
      const { result } = renderHook(() => useCardImage("Offline Card"));
      await waitFor(() => expect(result.current.src).toBe("http://visual-pack.localhost/installed-0"));
      expect(result.current.rungs).toEqual({
-@@ -922,6 +927,11 @@ describe("useCardImage", () => {
+@@ -894,13 +917,21 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn(() => false),
+       isLocaleArtReady: vi.fn(() => true),
+       loadLocaleArt: remoteWork,
+-      resolveFaceIndexSync: vi.fn(() => null),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
++            resolveFaceIndexSync: vi.fn(() => null),
+       resolveOracleIdSync: vi.fn(() => null),
+       resolvePrintingImageUrl: vi.fn(),
+     }));
  
      const { decodeCandidateKey } = await import("../../services/visualPacks/candidateKeys.ts");
      const { useCardImage } = await import("../useCardImage.ts");
@@ -148,7 +333,7 @@ index a5710c87b..074352176 100644
      const { result } = renderHook(() => useCardImage("Cárd", {
        oracleId: "11111111-1111-4111-8111-111111111111",
        faceName: "Cárd",
-@@ -1109,6 +1119,11 @@ describe("useCardImage", () => {
+@@ -1088,6 +1119,11 @@ describe("useCardImage", () => {
        collectorNumber: "1",
      });
      const { useCardImage } = await import("../useCardImage.ts");
@@ -160,7 +345,7 @@ index a5710c87b..074352176 100644
      const { result } = renderHook(() => useCardImage("Front", {
        oracleId: "11111111-1111-4111-8111-111111111111",
        faceName: "Back",
-@@ -1142,6 +1157,11 @@ describe("useCardImage", () => {
+@@ -1121,6 +1157,11 @@ describe("useCardImage", () => {
      const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
      useConnectivityStore.setState({ forcedOffline: true, browserOnline: true });
      const { useCardImage } = await import("../useCardImage.ts");
@@ -172,7 +357,7 @@ index a5710c87b..074352176 100644
      const initialProps: { size: "art_crop" | "large" } = { size: "art_crop" };
      const { result, rerender } = renderHook(({ size }: { size: "art_crop" | "large" }) => useCardImage("Card", {
        oracleId: "11111111-1111-4111-8111-111111111111",
-@@ -1180,6 +1200,11 @@ describe("useCardImage", () => {
+@@ -1159,6 +1200,11 @@ describe("useCardImage", () => {
      const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
      useConnectivityStore.setState({ forcedOffline: true, browserOnline: true });
      const { useCardImage } = await import("../useCardImage.ts");
@@ -184,7 +369,19 @@ index a5710c87b..074352176 100644
      const initialProps: { sourcePrinting?: { setCode: string; collectorNumber: string } } = {
        sourcePrinting: { setCode: "ABC", collectorNumber: "1" },
      };
-@@ -1249,6 +1274,11 @@ describe("useCardImage", () => {
+@@ -1217,7 +1263,10 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn(() => false),
+       isLocaleArtReady: vi.fn(() => true),
+       loadLocaleArt,
+-      resolveFaceIndexSync: vi.fn(() => null),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
++            resolveFaceIndexSync: vi.fn(() => null),
+       resolveOracleIdSync: vi.fn(() => null),
+       resolvePrintingImageUrl: vi.fn(),
+     }));
+@@ -1225,6 +1274,11 @@ describe("useCardImage", () => {
      const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
      useConnectivityStore.setState({ forcedOffline: true, browserOnline: true });
      const { useCardImage } = await import("../useCardImage.ts");
@@ -196,7 +393,19 @@ index a5710c87b..074352176 100644
      const { result } = renderHook(() => useCardImage("Card", {
        oracleId: "11111111-1111-4111-8111-111111111111",
        faceName: "Card",
-@@ -1335,6 +1365,11 @@ describe("useCardImage", () => {
+@@ -1300,7 +1354,10 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn(() => false),
+       isLocaleArtReady: vi.fn(() => true),
+       loadLocaleArt: vi.fn(),
+-      resolveFaceIndexSync: vi.fn(() => null),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
++            resolveFaceIndexSync: vi.fn(() => null),
+       resolveOracleIdSync: vi.fn(() => null),
+       resolvePrintingImageUrl: vi.fn(),
+     }));
+@@ -1308,6 +1365,11 @@ describe("useCardImage", () => {
      const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
      useConnectivityStore.setState({ forcedOffline: false, browserOnline: true });
      const { useCardImage } = await import("../useCardImage.ts");
@@ -208,7 +417,19 @@ index a5710c87b..074352176 100644
      const { result } = renderHook(() => useCardImage("Card", {
        oracleId: "11111111-1111-4111-8111-111111111111",
        faceName: "Card",
-@@ -1416,6 +1451,11 @@ describe("useCardImage", () => {
+@@ -1378,7 +1440,10 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn(() => false),
+       isLocaleArtReady: vi.fn(() => true),
+       loadLocaleArt: vi.fn(),
+-      resolveFaceIndexSync: vi.fn(() => null),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
++            resolveFaceIndexSync: vi.fn(() => null),
+       resolveOracleIdSync: vi.fn(() => null),
+       resolvePrintingImageUrl: vi.fn(),
+     }));
+@@ -1386,6 +1451,11 @@ describe("useCardImage", () => {
      const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
      useConnectivityStore.setState({ forcedOffline: false, browserOnline: true });
      const { useCardImage } = await import("../useCardImage.ts");
@@ -220,7 +441,19 @@ index a5710c87b..074352176 100644
      const { result, rerender } = renderHook(({ name }) => useCardImage(name, {
        oracleId: "11111111-1111-4111-8111-111111111111",
        faceName: "Card",
-@@ -1494,6 +1534,11 @@ describe("useCardImage", () => {
+@@ -1453,7 +1523,10 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn(() => false),
+       isLocaleArtReady: vi.fn(() => true),
+       loadLocaleArt: vi.fn(),
+-      resolveFaceIndexSync: vi.fn(() => derivedFaceIndex),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
++            resolveFaceIndexSync: vi.fn(() => derivedFaceIndex),
+       resolveOracleIdSync: vi.fn(() => derivedOracleId),
+       resolvePrintingImageUrl: vi.fn(),
+     }));
+@@ -1461,6 +1534,11 @@ describe("useCardImage", () => {
      const { useConnectivityStore } = await import("../../stores/connectivityStore.ts");
      useConnectivityStore.setState({ forcedOffline: false, browserOnline: true });
      const { useCardImage } = await import("../useCardImage.ts");
@@ -232,6 +465,345 @@ index a5710c87b..074352176 100644
      const { result, rerender } = renderHook(({ tick }) => {
        void tick;
        return useCardImage("Card", { faceName: "Card", faceIndex: 0 });
+@@ -1527,7 +1605,10 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn(() => false),
+       isLocaleArtReady: vi.fn(() => true),
+       loadLocaleArt: vi.fn(),
+-      resolveFaceIndexSync: vi.fn(() => null),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
++            resolveFaceIndexSync: vi.fn(() => null),
+       resolveOracleIdSync: vi.fn(() => null),
+       resolvePrintingImageUrl: vi.fn(),
+     }));
+@@ -1586,7 +1667,10 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn(() => false),
+       isLocaleArtReady: vi.fn(() => true),
+       loadLocaleArt: vi.fn(),
+-      resolveFaceIndexSync: vi.fn(() => null),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
++            resolveFaceIndexSync: vi.fn(() => null),
+       resolveOracleIdSync: vi.fn(() => null),
+       resolvePrintingImageUrl: vi.fn(),
+     }));
+@@ -1857,6 +1941,9 @@ describe("useCardImage", () => {
+       isCardImageRotatedSync: vi.fn().mockReturnValue(false),
+       isLocaleArtReady: vi.fn().mockReturnValue(true),
+       loadLocaleArt: vi.fn().mockResolvedValue(new Map()),
++      assetFallbackSources: (src: string, fallbackSrc?: string) =>
++        fallbackSrc && fallbackSrc !== src ? [{ kind: "remote", src: fallbackSrc }] : [],
++      derivedArtFallbackUrl: vi.fn(() => undefined),
+       resolveFaceIndexSync: vi.fn().mockReturnValue(null),
+       resolveOracleIdSync: vi.fn().mockReturnValue(null),
+       resolvePrintingImageUrl: vi.fn(),
+diff --git a/client/src/hooks/useCardImage.ts b/client/src/hooks/useCardImage.ts
+index 789396e10..74f967c2b 100644
+--- a/client/src/hooks/useCardImage.ts
++++ b/client/src/hooks/useCardImage.ts
+@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ 
+ import {
+   CARD_BACK_URL,
++  assetFallbackSources,
+   fetchCardImageAsset,
+   fetchCardImageAssetByOracleId,
+   fetchTokenImageAssetByRef,
+@@ -20,6 +21,7 @@ import {
+ } from "../services/scryfall.ts";
+ import type { ImageSize, PrintingEntry, TokenSearchFilters } from "../services/scryfall.ts";
+ import type { CardImageAsset } from "../services/scryfall.ts";
++import { resolveArtLanguage } from "../services/cardArtLocale.ts";
+ import { applyChain } from "../services/artSelection.ts";
+ import {
+   decodeTokenFilterKeywords,
+@@ -202,9 +204,63 @@ function remoteAsset(
+   size: ImageSize,
+   semantic: CardImageAsset["semantic"],
+   isRotated: boolean,
++  fallbackSrc?: string,
+ ): CardImageAsset {
+   const rungs = remoteRungs(src, size);
+-  return { src, isRotated, rungs, source: { kind: "remote", src, rungs }, semantic };
++  return { src, isRotated, rungs, source: { kind: "remote", src, rungs }, fallbackSrc, semantic };
++}
++
++/**
++ * Insert the derived art locale's English rung into an already-resolved ladder,
++ * directly after the URL it backs up.
++ *
++ * The second rung is what keeps a missing Chinese printing from becoming a text
++ * placeholder. `CardImage` funnels every load failure into `onError` →
++ * `advanceFailedSource`, which walks the ladder a rung at a time; without an
++ * English rung the walk reaches `{kind: "fallback", src: null}` and the card
++ * loses its art entirely, even though the same art exists one URL away.
++ *
++ * Inserted *before* the terminal `{kind: "fallback", src: null}` sentinel, not
++ * appended — the ladder is walked in array order, so a rung placed after the
++ * sentinel is never reached. That sentinel is `VisualPackRepository`'s, and it
++ * always closes the array, so the extra rung is spliced in ahead of it; an
++ * installed pack still wins because it precedes both.
++ *
++ * With no derived rung (every mapped locale) `sources` is returned as the very
++ * same array, leaving the existing six languages' ladder byte-identical.
++ */
++function withAssetSources(
++  sources: CardImageSource[],
++  asset: CardImageAsset,
++  size: ImageSize,
++): CardImageSource[] {
++  return insertBeforeTerminalFallback(
++    sources,
++    assetFallbackSources(asset.src, asset.fallbackSrc, size).filter(
++      (candidate) => !sources.some((existing) => existing.src === candidate.src),
++    ),
++  );
++}
++
++/**
++ * Splice `extra` rungs in directly ahead of the terminal `{kind: "fallback",
++ * src: null}` sentinel that `VisualPackRepository` always closes a ladder with.
++ *
++ * Exported for its own test because the invariant is positional and invisible in
++ * a snapshot: `advanceFailedSource` walks the array in order and stops at the
++ * first `{src: null}` it reaches, so an extra rung appended *after* the sentinel
++ * is dead code that also looks correct at the call site. Returning the input
++ * array unchanged when there is nothing to insert keeps the no-derived-locale
++ * path allocation-free.
++ */
++export function insertBeforeTerminalFallback(
++  sources: CardImageSource[],
++  extra: CardImageSource[],
++): CardImageSource[] {
++  if (extra.length === 0) return sources;
++  const terminal = sources.findIndex((source) => source.kind === "fallback");
++  if (terminal < 0) return [...sources, ...extra];
++  return [...sources.slice(0, terminal), ...extra, ...sources.slice(terminal)];
+ }
+ 
+ function metadataRepositoryGroups(
+@@ -461,6 +517,8 @@ function localeArtCacheKey(lang: string): string {
+  */
+ export function useLocaleArt(): string {
+   const language = usePreferencesStore((s) => s.language);
++  const artLanguagePreference = usePreferencesStore((s) => s.artLanguage);
++  const artLanguage = resolveArtLanguage(language, artLanguagePreference);
+   const [, setLocaleArtTick] = useState(0);
+ 
+   useEffect(() => {
+@@ -470,10 +528,10 @@ export function useLocaleArt(): string {
+   }, []);
+ 
+   useEffect(() => {
+-    loadLocaleArtInBackground(language);
+-  }, [language]);
++    loadLocaleArtInBackground(artLanguage);
++  }, [artLanguage]);
+ 
+-  return localeArtCacheKey(language);
++  return localeArtCacheKey(artLanguage);
+ }
+ 
+ function resolveStrategyInBackground(oracleId: string, chain: ArtChainEntry[]): void {
+@@ -711,10 +769,17 @@ async function acquireCachedImageSrc(
+     if (isToken) {
+       let remoteSrc: string | null = null;
+       let resolvedFaceIndex = faceIndex;
++      let remoteFallbackSrc: string | undefined;
+       if (tokenImageRef) {
+         try {
+           const tokenAsset = await fetchTokenImageAssetByRef(tokenImageRef, size);
+           remoteSrc = tokenAsset?.src ?? null;
++          // Half of Doctor Who's tokens have no Chinese image but all of them
++          // have an English one, so this rung is the difference between the
++          // English token and a broken tile. Carried on the asset beside `src`
++          // so it survives the `??=` below, which can replace the source but
++          // must not silently drop the rung of the one it replaces.
++          remoteFallbackSrc = tokenAsset?.fallbackSrc;
+           resolvedFaceIndex = tokenAsset?.faceIndex ?? resolvedFaceIndex;
+         } catch {
+           remoteSrc = null;
+@@ -739,6 +804,7 @@ async function acquireCachedImageSrc(
+           alias: cardName.toLowerCase().normalize("NFC"),
+         },
+         false,
++        remoteFallbackSrc,
+       );
+     } else if (oracleId) {
+       asset = await fetchCardImageAssetByOracleId(oracleId, faceName, size);
+@@ -833,11 +899,15 @@ export function useCardImage(
+   const artOverrides = usePreferencesStore((s) => s.artOverrides);
+   const artChain = usePreferencesStore((s) => s.artChain);
+   const effectiveOffline = useEffectiveOffline();
+-  // Card art follows the UI language: the printing the user chose is kept, and
+-  // only its image is swapped for the same printing in their language. Cards
+-  // with no localized sibling keep their English art.
++  // Card art follows the ART language, which defaults to the UI language but can
++  // be set independently (a player may read the UI in English and still want
++  // Chinese cards). The printing the user chose is kept, and only its image is
++  // swapped for the same printing in that language. Cards with no localized
++  // sibling keep their English art.
+   const language = usePreferencesStore((s) => s.language);
+-  const artLocaleKey = localeArtCacheKey(language);
++  const artLanguagePreference = usePreferencesStore((s) => s.artLanguage);
++  const artLanguage = resolveArtLanguage(language, artLanguagePreference);
++  const artLocaleKey = localeArtCacheKey(artLanguage);
+ 
+   const [src, setSrc] = useState<string | null>(null);
+   const [isRotated, setIsRotated] = useState(false);
+@@ -1097,7 +1167,7 @@ export function useCardImage(
+           continuation.settled = true;
+           return;
+         }
+-        loadLocaleArtInBackground(language);
++        loadLocaleArtInBackground(artLanguage);
+         try {
+           let imageAsset = selectedRemoteOverride();
+           if (!imageAsset) {
+@@ -1130,7 +1200,7 @@ export function useCardImage(
+               size,
+               cardName,
+               faceName,
+-              language,
++              artLanguage,
+               isToken,
+               stableTokenImageRef,
+             ),
+@@ -1140,7 +1210,7 @@ export function useCardImage(
+           });
+           const viable = result.sources.filter((source) =>
+             source.src === null || !failedSources.current.values.has(source.src));
+-          publish(viable.length > 0 ? viable : fallback, imageAsset);
++          publish(viable.length > 0 ? withAssetSources(viable, imageAsset, size) : fallback, imageAsset);
+         } catch {
+           publish(fallback);
+         } finally {
+@@ -1153,7 +1223,7 @@ export function useCardImage(
+     async function resolveLocal(): Promise<void> {
+       const groups = localCandidateGroups(
+         size,
+-        language,
++        artLanguage,
+         cardName,
+         faceName,
+         resolvedOracleId,
+@@ -1200,6 +1270,7 @@ export function useCardImage(
+     tokenImageRefKey,
+     isToken,
+     language,
++    artLanguage,
+     oracleId,
+     explicitPrintingId,
+     effectiveOffline,
+diff --git a/client/src/hooks/useEngineCardData.ts b/client/src/hooks/useEngineCardData.ts
+index b8a00dcd9..e601e0513 100644
+--- a/client/src/hooks/useEngineCardData.ts
++++ b/client/src/hooks/useEngineCardData.ts
+@@ -1,11 +1,13 @@
+ import { useEffect, useState } from "react";
+ 
+ import {
++  normalizeRulingText,
+   type CardRuling,
+   ensureCardLocale,
+ } from "../services/engineRuntime";
+ import { getSharedAdapter } from "../adapter/wasm-adapter";
+ import { usePreferencesStore } from "../stores/preferencesStore";
++import { resolveCardTextLanguage } from "../services/cardTextLocale";
+ 
+ /**
+  * Engine-parsed card face data returned from WASM.
+@@ -50,7 +52,13 @@ export interface ParsedItem {
+  * wrapper ensures that as a prerequisite, then performs the query.
+  */
+ export function useEngineCardData(cardName: string | null): EngineCardFace | null {
+-  const language = usePreferencesStore((s) => s.language);
++  // Card TEXT follows its own preference, not the interface language: the
++  // interface has no Chinese catalog, so keying card text off `language`
++  // would make a Chinese sidecar unreachable. Falls back to the interface
++  // language when the preference is "auto".
++  const language = usePreferencesStore((s) =>
++    resolveCardTextLanguage(s.language, s.cardTextLanguage),
++  );
+   const [data, setData] = useState<EngineCardFace | null>(null);
+ 
+   useEffect(() => {
+@@ -101,7 +109,13 @@ export function useEngineCardData(cardName: string | null): EngineCardFace | nul
+  * card name — the engine's identity key, which stays English everywhere.
+  */
+ export function useLocalizedCardName(name: string | null): string | null {
+-  const language = usePreferencesStore((s) => s.language);
++  // Card TEXT follows its own preference, not the interface language: the
++  // interface has no Chinese catalog, so keying card text off `language`
++  // would make a Chinese sidecar unreachable. Falls back to the interface
++  // language when the preference is "auto".
++  const language = usePreferencesStore((s) =>
++    resolveCardTextLanguage(s.language, s.cardTextLanguage),
++  );
+   const [localized, setLocalized] = useState<string | null>(name);
+ 
+   useEffect(() => {
+@@ -165,6 +179,11 @@ export function useCardParseDetails(cardName: string | null): ParsedItem[] | nul
+  * attached to the front face only).
+  */
+ export function useCardRulings(cardName: string | null): CardRuling[] {
++  // Card text and card rulings follow the same preference; a player reading
++  // Chinese cards is asking to read the rulings in Chinese too.
++  const language = usePreferencesStore((s) =>
++    resolveCardTextLanguage(s.language, s.cardTextLanguage),
++  );
+   const [rulings, setRulings] = useState<CardRuling[]>([]);
+ 
+   useEffect(() => {
+@@ -172,21 +191,37 @@ export function useCardRulings(cardName: string | null): CardRuling[] {
+       setRulings([]);
+       return;
+     }
+-
+     let cancelled = false;
+ 
+-    getSharedAdapter().getCardRulings(cardName)
+-      .then((result) => {
++    void (async () => {
++      try {
++        const result =
++          ((await getSharedAdapter().getCardRulings(cardName)) as CardRuling[] | null) ?? [];
+         if (cancelled) return;
+-        setRulings((result as CardRuling[] | null) ?? []);
+-      })
+-      .catch(() => {
++        if (result.length === 0 || language === "en") {
++          setRulings(result);
++          return;
++        }
++        const localeMap = await ensureCardLocale(language);
+         if (cancelled) return;
+-        setRulings([]);
+-      });
++        // Per-field fallback, exactly like the name/oracle-text overlay: a ruling
++        // with no translation keeps its English text rather than disappearing.
++        const translations = localeMap.get(cardName.toLowerCase())?.rulings;
++        setRulings(
++          translations
++            ? result.map((ruling) => ({
++                ...ruling,
++                text: translations[normalizeRulingText(ruling.text)] ?? ruling.text,
++              }))
++            : result,
++        );
++      } catch {
++        if (!cancelled) setRulings([]);
++      }
++    })();
+ 
+     return () => { cancelled = true; };
+-  }, [cardName]);
++  }, [cardName, language]);
+ 
+   return rulings;
+ }
 diff --git a/client/src/i18n/__tests__/localeParity.test.ts b/client/src/i18n/__tests__/localeParity.test.ts
 index 9c9be5f0b..25f099d21 100644
 --- a/client/src/i18n/__tests__/localeParity.test.ts
@@ -244,6 +816,534 @@ index 9c9be5f0b..25f099d21 100644
  };
  
  const isKnownGap = (ns: string, key: string) =>
+diff --git a/client/src/i18n/locales/de/settings.json b/client/src/i18n/locales/de/settings.json
+index f8b2dce98..c9eb67b2e 100644
+--- a/client/src/i18n/locales/de/settings.json
++++ b/client/src/i18n/locales/de/settings.json
+@@ -29,6 +29,8 @@
+     },
+     "title": "Spielablauf",
+     "language": "Sprache",
++    "artLanguage": "Sprache der Kartenbilder",
++    "artLanguageAuto": "Wie die Oberfläche",
+     "cardSize": "Kartengröße",
+     "commandZone": "Kommandozone",
+     "autoPass": "Auto-Pass",
+@@ -71,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Links",
+       "right": "Rechts"
+-    }
++    },
++    "cardTextLanguage": "Sprache des Kartentexts",
++    "cardTextLanguageAuto": "Oberfläche folgen"
+   },
+   "visual": {
+     "title": "Grafik",
+@@ -127,7 +131,9 @@
+     "cardAnimationStyleOptions": {
+       "webgl": "Neu",
+       "classic": "Klassisch"
+-    }
++    },
++    "cardAnimationPreviewHintHover": "Zum Ansehen darüberfahren",
++    "cardAnimationPreviewHintTap": "Zum Ansehen tippen"
+   },
+   "flexLayout": {
+     "title": "Flexibles Layout",
+@@ -506,11 +512,23 @@
+     "apiKey": "API-Schlüssel",
+     "apiKeyPlaceholder": "API-Schlüssel einfügen",
+     "apiKeyOptional": "Bei lokalen Servern optional",
++    "apiKeyMissing": "Gib deinen API-Schlüssel erneut ein. Schlüssel bleiben nach einem Neuladen nicht erhalten, und dieser Anbieter wird erst danach für KI-Plätze oder Draft-Bots verwendet.",
+     "apiKeyStorage": "Nur für diese Browsersitzung im Arbeitsspeicher. API-Schlüssel werden nie auf die Festplatte geschrieben und sind vom Backup-Export und der Cloud-Synchronisierung ausgenommen — nach einem Neuladen gibst du ihn erneut ein. Ein API-Schlüssel verlangt außerdem einen https://-Endpunkt, sofern der Server nicht auf localhost läuft.",
+     "apiKeyGet": "Schlüssel holen",
+     "test": "Verbindung testen",
+     "testing": "Test läuft …",
+     "testOk": "Verbunden.",
++    "defaultPrompt": {
++      "connected": "Verbunden. Als Standard-Gegner verwenden?",
++      "ready": "Diesen Anbieter als Standard-Gegner verwenden?",
++      "action": "Als Standard verwenden",
++      "badge": "Standard-Gegner"
++    },
++    "defaultOpponent": {
++      "label": "Standard-Gegner",
++      "hint": "KI-Gegner nutzen diesen Anbieter, sofern du beim Einrichten einer Partie für einen Platz keinen anderen wählst. Das gilt auch für den Gegner in Draft-Partien.",
++      "engine": "Integrierte Engine-KI"
++    },
+     "draftToggle": {
+       "label": "Für Draft-Bots verwenden",
+       "hint": "Bot-Plätze in einem Draft wählen mit dem Modell, samt Set-Kontext des Formats.",
+@@ -528,4 +546,4 @@
+       "oversized": "Der Endpunkt hat weit mehr Daten zurückgegeben, als eine Chat-Antwort umfasst."
+     }
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/client/src/i18n/locales/en/settings.json b/client/src/i18n/locales/en/settings.json
+index 1e89fd655..af3bae287 100644
+--- a/client/src/i18n/locales/en/settings.json
++++ b/client/src/i18n/locales/en/settings.json
+@@ -29,6 +29,8 @@
+     },
+     "title": "Gameplay",
+     "language": "Language",
++    "artLanguage": "Card art language",
++    "artLanguageAuto": "Follow interface",
+     "cardSize": "Card Size",
+     "commandZone": "Command Zone",
+     "autoPass": "Auto-Pass",
+@@ -71,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Left",
+       "right": "Right"
+-    }
++    },
++    "cardTextLanguage": "Card text language",
++    "cardTextLanguageAuto": "Follow interface"
+   },
+   "visual": {
+     "title": "Visual",
+@@ -127,7 +131,9 @@
+     "cardAnimationStyleOptions": {
+       "webgl": "New",
+       "classic": "Classic"
+-    }
++    },
++    "cardAnimationPreviewHintHover": "Hover to preview",
++    "cardAnimationPreviewHintTap": "Tap to preview"
+   },
+   "flexLayout": {
+     "title": "Flex Layout",
+@@ -506,11 +512,23 @@
+     "apiKey": "API key",
+     "apiKeyPlaceholder": "Paste your API key",
+     "apiKeyOptional": "Optional for local servers",
++    "apiKeyMissing": "Enter your API key again. Keys are not saved across reloads, and this provider is not used for AI seats or draft bots until you do.",
+     "apiKeyStorage": "Kept in memory for this browser session only. API keys are never written to disk and are excluded from backup export and cloud sync, so you will re-enter yours after a reload. An API key also requires an https:// endpoint unless the server is on localhost.",
+     "apiKeyGet": "Get a key",
+     "test": "Test connection",
+     "testing": "Testing…",
+     "testOk": "Connected.",
++    "defaultPrompt": {
++      "connected": "Connected. Use this as your default opponent?",
++      "ready": "Use this provider as your default opponent?",
++      "action": "Use as default",
++      "badge": "Default opponent"
++    },
++    "defaultOpponent": {
++      "label": "Default opponent",
++      "hint": "AI opponents use this provider unless you pick a different one for a seat when setting up a match. This includes the opponent in draft matches.",
++      "engine": "Built-in engine AI"
++    },
+     "draftToggle": {
+       "label": "Use for draft bots",
+       "hint": "Bot seats in a draft pod pick with the model, using the format’s set context.",
+@@ -528,4 +546,4 @@
+       "oversized": "The endpoint returned far more data than a chat completion."
+     }
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/client/src/i18n/locales/es/settings.json b/client/src/i18n/locales/es/settings.json
+index 87c389616..bb38a120a 100644
+--- a/client/src/i18n/locales/es/settings.json
++++ b/client/src/i18n/locales/es/settings.json
+@@ -29,6 +29,8 @@
+     },
+     "title": "Jugabilidad",
+     "language": "Idioma",
++    "artLanguage": "Idioma de las ilustraciones",
++    "artLanguageAuto": "Igual que la interfaz",
+     "cardSize": "Tamaño de las cartas",
+     "commandZone": "Zona de mando",
+     "autoPass": "Auto-Pass",
+@@ -71,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Izquierda",
+       "right": "Derecha"
+-    }
++    },
++    "cardTextLanguage": "Idioma del texto de las cartas",
++    "cardTextLanguageAuto": "Seguir la interfaz"
+   },
+   "visual": {
+     "title": "Visual",
+@@ -127,7 +131,9 @@
+     "cardAnimationStyleOptions": {
+       "webgl": "Nuevas",
+       "classic": "Clásicas"
+-    }
++    },
++    "cardAnimationPreviewHintHover": "Pasa el cursor para ver",
++    "cardAnimationPreviewHintTap": "Toca para ver"
+   },
+   "flexLayout": {
+     "title": "Diseño flexible",
+@@ -506,11 +512,23 @@
+     "apiKey": "Clave de API",
+     "apiKeyPlaceholder": "Pega tu clave de API",
+     "apiKeyOptional": "Opcional para servidores locales",
++    "apiKeyMissing": "Vuelve a introducir tu clave de API. Las claves no se conservan al recargar, y este proveedor no se usa para los asientos de IA ni para los bots del draft hasta que lo hagas.",
+     "apiKeyStorage": "Se mantiene en memoria solo durante esta sesión del navegador. Las claves de API nunca se escriben en disco y quedan excluidas de la copia de seguridad y de la sincronización en la nube, así que tendrás que volver a introducirla tras recargar. Además, una clave de API exige un endpoint https:// salvo que el servidor esté en localhost.",
+     "apiKeyGet": "Obtener una clave",
+     "test": "Probar conexión",
+     "testing": "Probando…",
+     "testOk": "Conectado.",
++    "defaultPrompt": {
++      "connected": "Conectado. ¿Usarlo como tu oponente predeterminado?",
++      "ready": "¿Usar este proveedor como tu oponente predeterminado?",
++      "action": "Usar como predeterminado",
++      "badge": "Oponente predeterminado"
++    },
++    "defaultOpponent": {
++      "label": "Oponente predeterminado",
++      "hint": "Los oponentes de IA usan este proveedor salvo que elijas otro para un asiento al preparar una partida. Incluye al oponente de las partidas de draft.",
++      "engine": "IA integrada del motor"
++    },
+     "draftToggle": {
+       "label": "Usar para los bots del draft",
+       "hint": "Los asientos de bot de un draft eligen con el modelo, usando el contexto de sets del formato.",
+@@ -528,4 +546,4 @@
+       "oversized": "El endpoint devolvió muchos más datos de los que cabe esperar de una respuesta de chat."
+     }
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/client/src/i18n/locales/fr/settings.json b/client/src/i18n/locales/fr/settings.json
+index 3ba82dbb5..4c99fecf2 100644
+--- a/client/src/i18n/locales/fr/settings.json
++++ b/client/src/i18n/locales/fr/settings.json
+@@ -29,6 +29,8 @@
+     },
+     "title": "Jouabilité",
+     "language": "Langue",
++    "artLanguage": "Langue des illustrations",
++    "artLanguageAuto": "Comme l’interface",
+     "cardSize": "Taille des cartes",
+     "commandZone": "Zone de commandement",
+     "autoPass": "Auto-Pass",
+@@ -71,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Gauche",
+       "right": "Droite"
+-    }
++    },
++    "cardTextLanguage": "Langue du texte des cartes",
++    "cardTextLanguageAuto": "Suivre l'interface"
+   },
+   "visual": {
+     "title": "Visuel",
+@@ -127,7 +131,9 @@
+     "cardAnimationStyleOptions": {
+       "webgl": "Nouvelles",
+       "classic": "Classiques"
+-    }
++    },
++    "cardAnimationPreviewHintHover": "Survolez pour prévisualiser",
++    "cardAnimationPreviewHintTap": "Touchez pour prévisualiser"
+   },
+   "flexLayout": {
+     "title": "Disposition flexible",
+@@ -506,11 +512,23 @@
+     "apiKey": "Clé d'API",
+     "apiKeyPlaceholder": "Collez votre clé d'API",
+     "apiKeyOptional": "Facultative pour un serveur local",
++    "apiKeyMissing": "Saisissez à nouveau votre clé d'API. Les clés ne sont pas conservées après un rechargement, et ce fournisseur n'est utilisé ni pour les sièges IA ni pour les bots de draft tant que vous ne l'avez pas fait.",
+     "apiKeyStorage": "Conservée en mémoire pour cette session de navigation uniquement. Les clés d'API ne sont jamais écrites sur le disque et sont exclues de l'export de sauvegarde et de la synchronisation cloud : vous la ressaisirez après un rechargement. Une clé d'API impose aussi un point de terminaison https://, sauf si le serveur est sur localhost.",
+     "apiKeyGet": "Obtenir une clé",
+     "test": "Tester la connexion",
+     "testing": "Test en cours…",
+     "testOk": "Connecté.",
++    "defaultPrompt": {
++      "connected": "Connecté. L'utiliser comme adversaire par défaut ?",
++      "ready": "Utiliser ce fournisseur comme adversaire par défaut ?",
++      "action": "Utiliser par défaut",
++      "badge": "Adversaire par défaut"
++    },
++    "defaultOpponent": {
++      "label": "Adversaire par défaut",
++      "hint": "Les adversaires IA utilisent ce fournisseur, sauf si vous en choisissez un autre pour un siège en préparant une partie. Cela inclut l'adversaire des parties de draft.",
++      "engine": "IA intégrée du moteur"
++    },
+     "draftToggle": {
+       "label": "Utiliser pour les bots de draft",
+       "hint": "Les sièges bots d'un draft choisissent avec le modèle, avec le contexte des éditions du format.",
+@@ -528,4 +546,4 @@
+       "oversized": "Le point de terminaison a renvoyé bien plus de données qu'une réponse de chat."
+     }
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/client/src/i18n/locales/it/settings.json b/client/src/i18n/locales/it/settings.json
+index f12290726..27567b645 100644
+--- a/client/src/i18n/locales/it/settings.json
++++ b/client/src/i18n/locales/it/settings.json
+@@ -29,6 +29,8 @@
+     },
+     "title": "Giocabilità",
+     "language": "Lingua",
++    "artLanguage": "Lingua delle illustrazioni",
++    "artLanguageAuto": "Come l’interfaccia",
+     "cardSize": "Dimensione carte",
+     "commandZone": "Zona di comando",
+     "autoPass": "Auto-Pass",
+@@ -71,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Sinistra",
+       "right": "Destra"
+-    }
++    },
++    "cardTextLanguage": "Lingua del testo delle carte",
++    "cardTextLanguageAuto": "Segui l'interfaccia"
+   },
+   "visual": {
+     "title": "Grafica",
+@@ -127,7 +131,9 @@
+     "cardAnimationStyleOptions": {
+       "webgl": "Nuove",
+       "classic": "Classiche"
+-    }
++    },
++    "cardAnimationPreviewHintHover": "Passa il mouse per l'anteprima",
++    "cardAnimationPreviewHintTap": "Tocca per l'anteprima"
+   },
+   "flexLayout": {
+     "title": "Layout flessibile",
+@@ -506,11 +512,23 @@
+     "apiKey": "Chiave API",
+     "apiKeyPlaceholder": "Incolla la tua chiave API",
+     "apiKeyOptional": "Facoltativa per i server locali",
++    "apiKeyMissing": "Inserisci di nuovo la tua chiave API. Le chiavi non vengono conservate dopo un ricaricamento e questo provider non viene usato per i posti IA o i bot del draft finché non lo fai.",
+     "apiKeyStorage": "Conservata in memoria solo per questa sessione del browser. Le chiavi API non vengono mai scritte su disco e sono escluse dall'esportazione di backup e dalla sincronizzazione cloud: dopo un ricaricamento dovrai reinserirla. Una chiave API richiede inoltre un endpoint https://, a meno che il server non sia su localhost.",
+     "apiKeyGet": "Ottieni una chiave",
+     "test": "Prova connessione",
+     "testing": "Prova in corso…",
+     "testOk": "Connesso.",
++    "defaultPrompt": {
++      "connected": "Connesso. Usarlo come avversario predefinito?",
++      "ready": "Usare questo provider come avversario predefinito?",
++      "action": "Usa come predefinito",
++      "badge": "Avversario predefinito"
++    },
++    "defaultOpponent": {
++      "label": "Avversario predefinito",
++      "hint": "Gli avversari IA usano questo provider, a meno che non ne scelga un altro per un posto durante la configurazione della partita. Vale anche per l'avversario delle partite di draft.",
++      "engine": "IA integrata del motore"
++    },
+     "draftToggle": {
+       "label": "Usa per i bot del draft",
+       "hint": "I posti bot di un draft scelgono con il modello, usando il contesto dei set del formato.",
+@@ -528,4 +546,4 @@
+       "oversized": "L'endpoint ha restituito molti più dati di una risposta di chat."
+     }
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/client/src/i18n/locales/ja/settings.json b/client/src/i18n/locales/ja/settings.json
+index 0446066e9..1d0ba67d7 100644
+--- a/client/src/i18n/locales/ja/settings.json
++++ b/client/src/i18n/locales/ja/settings.json
+@@ -29,6 +29,8 @@
+     },
+     "title": "ゲームプレイ",
+     "language": "言語",
++    "artLanguage": "カード画像の言語",
++    "artLanguageAuto": "インターフェースに合わせる",
+     "cardSize": "カードサイズ",
+     "commandZone": "統率領域",
+     "autoPass": "自動パス",
+@@ -71,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "左",
+       "right": "右"
+-    }
++    },
++    "cardTextLanguage": "カードテキストの言語",
++    "cardTextLanguageAuto": "インターフェースに合わせる"
+   },
+   "visual": {
+     "title": "表示",
+@@ -127,7 +131,9 @@
+     "cardAnimationStyleOptions": {
+       "webgl": "新スタイル",
+       "classic": "クラシック"
+-    }
++    },
++    "cardAnimationPreviewHintHover": "ホバーでプレビュー",
++    "cardAnimationPreviewHintTap": "タップでプレビュー"
+   },
+   "flexLayout": {
+     "title": "フレックスレイアウト",
+@@ -506,11 +512,23 @@
+     "apiKey": "APIキー",
+     "apiKeyPlaceholder": "APIキーを貼り付け",
+     "apiKeyOptional": "ローカルサーバーでは任意",
++    "apiKeyMissing": "APIキーをもう一度入力してください。キーは再読み込み後に保持されず、入力するまでこのプロバイダーはAI席やドラフトボットに使用されません。",
+     "apiKeyStorage": "APIキーは、このブラウザーのセッション中のみメモリに保持されます。ディスクには保存されず、バックアップのエクスポートやクラウド同期にも含まれないため、再読み込み後は再入力が必要です。また、サーバーがlocalhostで動作している場合を除き、APIキーを使うにはhttps://のエンドポイントが必要です。",
+     "apiKeyGet": "キーを取得",
+     "test": "接続をテスト",
+     "testing": "テスト中…",
+     "testOk": "接続しました。",
++    "defaultPrompt": {
++      "connected": "接続しました。デフォルトの対戦相手として使用しますか？",
++      "ready": "このプロバイダーをデフォルトの対戦相手として使用しますか？",
++      "action": "デフォルトにする",
++      "badge": "デフォルトの対戦相手"
++    },
++    "defaultOpponent": {
++      "label": "デフォルトの対戦相手",
++      "hint": "対戦のセットアップで席ごとに別のプロバイダーを選ばない限り、AI対戦相手はこのプロバイダーを使用します。ドラフト後の対戦相手にも適用されます。",
++      "engine": "内蔵エンジンAI"
++    },
+     "draftToggle": {
+       "label": "ドラフトのボットに使用",
+       "hint": "ドラフト・ポッドのボットが、フォーマットのセット情報を参照してモデルでピックします。",
+@@ -528,4 +546,4 @@
+       "oversized": "エンドポイントから、チャット応答としては大きすぎるデータが返されました。"
+     }
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/client/src/i18n/locales/pl/settings.json b/client/src/i18n/locales/pl/settings.json
+index f36096d91..bf0b30e01 100644
+--- a/client/src/i18n/locales/pl/settings.json
++++ b/client/src/i18n/locales/pl/settings.json
+@@ -29,6 +29,8 @@
+     },
+     "title": "Rozgrywka",
+     "language": "Język",
++    "artLanguage": "Język grafik kart",
++    "artLanguageAuto": "Tak jak interfejs",
+     "cardSize": "Rozmiar kart",
+     "commandZone": "Strefa dowodzenia",
+     "autoPass": "Auto-Pass",
+@@ -71,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Lewo",
+       "right": "Prawo"
+-    }
++    },
++    "cardTextLanguage": "Język tekstu kart",
++    "cardTextLanguageAuto": "Zgodnie z interfejsem"
+   },
+   "visual": {
+     "title": "Grafika",
+@@ -127,7 +131,9 @@
+     "cardAnimationStyleOptions": {
+       "webgl": "Nowe",
+       "classic": "Klasyczne"
+-    }
++    },
++    "cardAnimationPreviewHintHover": "Najedź, aby zobaczyć podgląd",
++    "cardAnimationPreviewHintTap": "Dotknij, aby zobaczyć podgląd"
+   },
+   "flexLayout": {
+     "title": "Elastyczny układ",
+@@ -506,11 +512,23 @@
+     "apiKey": "Klucz API",
+     "apiKeyPlaceholder": "Wklej swój klucz API",
+     "apiKeyOptional": "Opcjonalny dla serwerów lokalnych",
++    "apiKeyMissing": "Wpisz klucz API ponownie. Klucze nie są zachowywane po przeładowaniu, a ten dostawca nie jest używany dla miejsc AI ani botów w draftcie, dopóki tego nie zrobisz.",
+     "apiKeyStorage": "Przechowywany w pamięci tylko na czas tej sesji przeglądarki. Klucze API nigdy nie trafiają na dysk i są wyłączone z eksportu kopii zapasowej oraz synchronizacji w chmurze, więc po przeładowaniu trzeba go wpisać ponownie. Klucz API wymaga też endpointu https://, chyba że serwer działa na localhost.",
+     "apiKeyGet": "Zdobądź klucz",
+     "test": "Testuj połączenie",
+     "testing": "Testowanie…",
+     "testOk": "Połączono.",
++    "defaultPrompt": {
++      "connected": "Połączono. Użyć jako domyślnego przeciwnika?",
++      "ready": "Użyć tego dostawcy jako domyślnego przeciwnika?",
++      "action": "Użyj jako domyślnego",
++      "badge": "Domyślny przeciwnik"
++    },
++    "defaultOpponent": {
++      "label": "Domyślny przeciwnik",
++      "hint": "Przeciwnicy AI używają tego dostawcy, chyba że przy konfiguracji meczu wybierzesz innego dla danego miejsca. Dotyczy to także przeciwnika w meczach po drafcie.",
++      "engine": "Wbudowane AI silnika"
++    },
+     "draftToggle": {
+       "label": "Użyj do botów w drafcie",
+       "hint": "Boty w drafcie wybierają kartę modelem, z kontekstem dodatków danego formatu.",
+@@ -528,4 +546,4 @@
+       "oversized": "Endpoint zwrócił znacznie więcej danych niż odpowiedź czatu."
+     }
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/client/src/i18n/locales/pt/settings.json b/client/src/i18n/locales/pt/settings.json
+index e150e312e..428944e95 100644
+--- a/client/src/i18n/locales/pt/settings.json
++++ b/client/src/i18n/locales/pt/settings.json
+@@ -29,6 +29,8 @@
+     },
+     "title": "Jogabilidade",
+     "language": "Idioma",
++    "artLanguage": "Idioma das artes",
++    "artLanguageAuto": "Igual à interface",
+     "cardSize": "Tamanho da Carta",
+     "commandZone": "Zona de comando",
+     "autoPass": "Auto-Pass",
+@@ -71,7 +73,9 @@
+     "logDockSideOptions": {
+       "left": "Esquerda",
+       "right": "Direita"
+-    }
++    },
++    "cardTextLanguage": "Idioma do texto das cartas",
++    "cardTextLanguageAuto": "Seguir a interface"
+   },
+   "visual": {
+     "title": "Visual",
+@@ -127,7 +131,9 @@
+     "cardAnimationStyleOptions": {
+       "webgl": "Novas",
+       "classic": "Clássicas"
+-    }
++    },
++    "cardAnimationPreviewHintHover": "Passe o cursor para pré-visualizar",
++    "cardAnimationPreviewHintTap": "Toque para pré-visualizar"
+   },
+   "flexLayout": {
+     "title": "Layout flexível",
+@@ -506,11 +512,23 @@
+     "apiKey": "Chave de API",
+     "apiKeyPlaceholder": "Cola a tua chave de API",
+     "apiKeyOptional": "Opcional para servidores locais",
++    "apiKeyMissing": "Introduz novamente a tua chave de API. As chaves não são guardadas após recarregar, e este fornecedor não é usado nos lugares de IA nem nos bots do draft até o fazeres.",
+     "apiKeyStorage": "Mantida em memória apenas nesta sessão do navegador. As chaves de API nunca são escritas em disco e ficam excluídas da exportação de cópia de segurança e da sincronização na nuvem, por isso terás de a introduzir novamente após recarregar. Uma chave de API exige também um endpoint https://, a menos que o servidor esteja em localhost.",
+     "apiKeyGet": "Obter uma chave",
+     "test": "Testar ligação",
+     "testing": "A testar…",
+     "testOk": "Ligado.",
++    "defaultPrompt": {
++      "connected": "Ligado. Usá-lo como oponente predefinido?",
++      "ready": "Usar este fornecedor como oponente predefinido?",
++      "action": "Usar como predefinido",
++      "badge": "Oponente predefinido"
++    },
++    "defaultOpponent": {
++      "label": "Oponente predefinido",
++      "hint": "Os oponentes de IA usam este fornecedor, a menos que escolhas outro para um lugar ao preparar uma partida. Inclui o oponente das partidas de draft.",
++      "engine": "IA integrada do motor"
++    },
+     "draftToggle": {
+       "label": "Usar para os bots do draft",
+       "hint": "Os lugares de bot de um draft escolhem com o modelo, usando o contexto de colecções do formato.",
+@@ -528,4 +546,4 @@
+       "oversized": "O endpoint devolveu muitos mais dados do que uma resposta de chat."
+     }
+   }
+-}
++}
+\ No newline at end of file
 diff --git a/client/src/i18n/locales/zhs/common.json b/client/src/i18n/locales/zhs/common.json
 new file mode 100644
 index 000000000..c9e26c966
@@ -1815,12 +2915,17 @@ index 000000000..a3d86f470
 +}
 diff --git a/client/src/i18n/locales/zhs/game.json b/client/src/i18n/locales/zhs/game.json
 new file mode 100644
-index 000000000..cabebc3db
+index 000000000..71583cc47
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/game.json
-@@ -0,0 +1,2647 @@
+@@ -0,0 +1,2645 @@
 +{
-+  "playerLatency": {"host":"Host","waiting":"Waiting","value":"{{ms}} ms","description":"Round-trip latency to the host. A missing reply does not disconnect the game."},
++  "playerLatency": {
++    "host": "Host",
++    "waiting": "Waiting",
++    "value": "{{ms}} ms",
++    "description": "Round-trip latency to the host. A missing reply does not disconnect the game."
++  },
 +  "abilityBlock": {
 +    "badge": "Blocked",
 +    "cantBeActivated": "This ability can't be activated",
@@ -1831,9 +2936,6 @@ index 000000000..cabebc3db
 +  "manaSourceSelection": {
 +    "title": "Choose a mana source",
 +    "description": "This mana ability requires sacrificing a permanent.",
-+    "baseOutput_one": "Base output: {{count}} mana",
-+    "baseOutput_other": "Base output: {{count}} mana",
-+    "baseOutputVariable": "Base amount determined on activation",
 +    "sacrifice": "Sacrifice",
 +    "back": "Back to mana payment",
 +    "unknownSource": "Mana source"
@@ -4130,9 +5232,7 @@ index 000000000..cabebc3db
 +    "accept": "Yes",
 +    "decline": "No",
 +    "sourceFallback": "Effect",
-+    "entryLabel": "{{source}} — {{decision}}",
-+    "optionalTriggers": "Optional triggers ({{count, number}})",
-+    "replacementChoices": "Replacement choices ({{count, number}})"
++    "entryLabel": "{{source}} — {{decision}}"
 +  },
 +  "optionalEffect": {
 +    "sourceFallback": "Effect",
@@ -4212,8 +5312,6 @@ index 000000000..cabebc3db
 +    "confirm": "Confirm"
 +  },
 +  "replacement": {
-+    "remember": "Remember this choice this game",
-+    "savedChoice": "Replacement: {{choice}}",
 +    "eyebrow": "Resolution Order",
 +    "title": "Replacement Effects",
 +    "orderSubtitle": "These effects all change how this event happens. Drag to set the order they apply in — the last one applied is the one that takes effect (CR 616.1).",
@@ -5235,10 +6333,10 @@ index 000000000..e70293dfb
 +}
 diff --git a/client/src/i18n/locales/zhs/settings.json b/client/src/i18n/locales/zhs/settings.json
 new file mode 100644
-index 000000000..d0437d92f
+index 000000000..32ad7999b
 --- /dev/null
 +++ b/client/src/i18n/locales/zhs/settings.json
-@@ -0,0 +1,547 @@
+@@ -0,0 +1,549 @@
 +{
 +  "modal": {
 +    "title": "Settings",
@@ -5270,8 +6368,8 @@ index 000000000..d0437d92f
 +    },
 +    "title": "Gameplay",
 +    "language": "Language",
-+    "artLanguage": "Card art language",
-+    "artLanguageAuto": "Follow interface",
++    "artLanguage": "卡牌插画语言",
++    "artLanguageAuto": "跟随界面",
 +    "cardSize": "Card Size",
 +    "commandZone": "Command Zone",
 +    "autoPass": "Auto-Pass",
@@ -5314,7 +6412,9 @@ index 000000000..d0437d92f
 +    "logDockSideOptions": {
 +      "left": "Left",
 +      "right": "Right"
-+    }
++    },
++    "cardTextLanguage": "卡牌文本语言",
++    "cardTextLanguageAuto": "跟随界面"
 +  },
 +  "visual": {
 +    "title": "Visual",
@@ -6003,22 +7103,115 @@ index b60de5bf8..ce0df0080 100644
  }
  
 diff --git a/client/src/services/__tests__/scryfall.test.ts b/client/src/services/__tests__/scryfall.test.ts
-index ebe595859..569250248 100644
+index cce6505f5..569250248 100644
 --- a/client/src/services/__tests__/scryfall.test.ts
 +++ b/client/src/services/__tests__/scryfall.test.ts
-@@ -2098,14 +2098,31 @@ describe("derived card art locales", () => {
-     expect(mod.resolvePrintingImageUrl(printing(EN_ID), 1, "normal")).toBe(derivedUrl(EN_ID, "zhs", "normal", "back"));
+@@ -12,6 +12,9 @@ import { tmpdir } from "node:os";
+ import path from "node:path";
+ import { fileURLToPath, pathToFileURL } from "node:url";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { insertBeforeTerminalFallback } from "../../hooks/useCardImage.ts";
++import { isDerivedArtLocale, resolveArtLanguage } from "../cardArtLocale.ts";
++import { assetKey, catalogRoot, packId } from "../visualPacks/types.ts";
+ 
+ import type { PrintingEntry } from "../scryfall.ts";
+ 
+@@ -2007,3 +2010,526 @@ describe("localized card art", () => {
+     expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal")).toBe(cardUrl(DE_ID));
    });
- 
--  it("leaves art crops on Scryfall", async () => {
+ });
++
++/**
++ * The derived branch of the same funnel: locales whose art is addressed by the
++ * English printing id rather than named by a sidecar map.
++ *
++ * Simplified Chinese is the only such locale, because Scryfall has no
++ * Simplified-Chinese printings at all — the art lives on a community host that
++ * mirrors Scryfall's path layout, so `zhs` needs no generated map and no network
++ * request to become ready.
++ */
++describe("derived card art locales", () => {
++  const EN_ID = "0dbac7ce-a6fa-466e-b6ba-173cf2dec98e";
++  const CARD_BACK = "https://backs.scryfall.io/normal/0/a/0aeebaf5-8c7d-4636-9e82-8c27447861f7.jpg";
++  const PLACEHOLDER = "https://errors.scryfall.com/soon.jpg";
++
++  const scryfallUrl = (id: string, size = "normal", face = "front", query = "") =>
++    `https://cards.scryfall.io/${size}/${face}/${id[0]}/${id[1]}/${id}.jpg${query}`;
++  const derivedUrl = (id: string, prefix: "zhs" | "sf", size = "normal", face = "front") =>
++    `https://images.mtgch.com/${prefix}/${size}/${face}/${id[0]}/${id[1]}/${id}.webp`;
++
++  const printing = (id: string, query = ""): PrintingEntry => ({
++    id,
++    set: "mid",
++    set_name: "Innistrad: Midnight Hunt",
++    collector_number: "7",
++    released_at: "2021-09-24",
++    border_color: "black",
++    frame_effects: [],
++    full_art: false,
++    faces: [
++      {
++        small: scryfallUrl(id, "small", "front", query),
++        normal: scryfallUrl(id, "normal", "front", query),
++        art_crop: scryfallUrl(id, "art_crop"),
++      },
++      {
++        small: scryfallUrl(id, "small", "back", query),
++        normal: scryfallUrl(id, "normal", "back", query),
++        art_crop: scryfallUrl(id, "art_crop", "back"),
++      },
++    ],
++  });
++
++  beforeEach(() => {
++    vi.restoreAllMocks();
++  });
++
++  it("re-addresses the English printing onto the Chinese host, keeping the printing", async () => {
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("zhs");
++
++    const resolved = mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal");
++
++    expect(resolved).toBe(derivedUrl(EN_ID, "zhs"));
++    // Non-vacuity: an untouched base URL would be the Scryfall original.
++    expect(resolved).not.toBe(scryfallUrl(EN_ID));
++    // The shard directories are the printing id's own prefix, not a guess.
++    expect(resolved).toContain(`/${EN_ID[0]}/${EN_ID[1]}/`);
++  });
++
++  it("keeps the printing id, so art follows the printing the player chose", async () => {
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("zhs");
++
++    // Two printings of one card must not collapse onto one image.
++    const other = "345a1cf0-e4de-42a9-9c72-ed16826b9067";
++    expect(mod.resolvePrintingImageUrl(printing(other), 0, "normal")).toBe(derivedUrl(other, "zhs"));
++  });
++
++  it("derives every face size that exists on that host", async () => {
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("zhs");
++
++    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "small")).toBe(derivedUrl(EN_ID, "zhs", "small"));
++    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal")).toBe(derivedUrl(EN_ID, "zhs", "normal"));
++    // `large` collapses onto `normal`, exactly as it does on Scryfall — that is
++    // the app-wide 488px ceiling, not a Chinese-specific rule, so this locale
++    // must not quietly double its own bitmap budget.
++    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "large")).toBe(derivedUrl(EN_ID, "zhs", "normal"));
++  });
++
++  it("localizes the back face with the same printing id", async () => {
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("zhs");
++
++    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 1, "normal")).toBe(derivedUrl(EN_ID, "zhs", "normal", "back"));
++  });
++
 +  it("sends art crops to the language-neutral prefix", async () => {
-     const mod = await loadScryfallModule();
-     await mod.loadLocaleArt("zhs");
- 
--    // An art crop is the illustration alone and carries no language; the stored
--    // crop URL is also the one the browser already cached, so moving it to a
--    // second host would re-download the identical picture to gain nothing.
--    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "art_crop")).toBe(scryfallUrl(EN_ID, "art_crop"));
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("zhs");
++
 +    // An art crop is the illustration alone and carries no language, and this
 +    // host serves no localized crop at all (measured 404). It therefore goes to
 +    // the SAME printing on the language-neutral prefix rather than to the
@@ -6040,9 +7233,573 @@ index ebe595859..569250248 100644
 +    expect(mod.resolvePrintingImageUrl(printing(printingId), 0, "normal")).toBe(
 +      derivedUrl(printingId, "zhs"),
 +    );
-   });
- 
-   it("drops the English cache-buster, which names no object on that host", async () => {
++  });
++
++  it("drops the English cache-buster, which names no object on that host", async () => {
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("zhs");
++
++    expect(mod.resolvePrintingImageUrl(printing(EN_ID, "?1783921885"), 0, "normal"))
++      .toBe(derivedUrl(EN_ID, "zhs"));
++  });
++
++  it("never rewrites the card back or the art placeholder", async () => {
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("zhs");
++
++    // Both are non-derivable shapes, and the placeholder MUST come back
++    // byte-identical or `isPlaceholderImageUrl` stops gating art fallback.
++    expect(mod.deriveImageUrl(CARD_BACK, "normal")).toBe(CARD_BACK);
++    expect(mod.derivedArtFallbackUrl(CARD_BACK)).toBeUndefined();
++    expect(mod.derivedArtFallbackUrl(PLACEHOLDER)).toBeUndefined();
++  });
++
++  it("reports readiness without any network request", async () => {
++    const mod = await loadScryfallModule();
++    const fetchMock = vi.fn();
++    global.fetch = fetchMock;
++
++    expect(mod.isLocaleArtReady("zhs")).toBe(false);
++    const map = await mod.loadLocaleArt("zhs");
++
++    // There is no `scryfall-images.v2.zhs.json`; a fetch here would 404 on every
++    // load. The empty map is the truthful value — the locale, not the map, is
++    // what the derived branch reads.
++    expect(fetchMock).not.toHaveBeenCalled();
++    expect(map.size).toBe(0);
++    expect(mod.isLocaleArtReady("zhs")).toBe(true);
++  });
++
++  it("replaces a previously installed mapped locale", async () => {
++    const mod = await loadScryfallModule();
++    global.fetch = vi.fn().mockResolvedValue(
++      new Response(JSON.stringify({}), { status: 404 }),
++    );
++    await mod.loadLocaleArt("de");
++    expect(mod.isLocaleArtReady("de")).toBe(true);
++
++    await mod.loadLocaleArt("zhs");
++
++    // Switching locale must switch the rewrite, not layer on top of it.
++    expect(mod.isLocaleArtReady("de")).toBe(false);
++    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal")).toBe(derivedUrl(EN_ID, "zhs"));
++  });
++
++  it("exposes the English rung of the same host as the fallback", async () => {
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("zhs");
++
++    // The second rung is what turns a 404 (that printing has no Chinese image)
++    // into English art instead of a text placeholder. Measured: roughly a third
++    // to three quarters of printings have one, and the newest sets have none.
++    //
++    // Takes the base Scryfall URL — the same input `localizeImageUrl` takes — so
++    // a caller holds one URL and asks for the rung that replaces it on failure.
++    expect(mod.derivedArtFallbackUrl(scryfallUrl(EN_ID))).toBe(derivedUrl(EN_ID, "sf"));
++    // And the two rungs are the two sides of the same rewrite, not one URL twice.
++    expect(mod.derivedArtFallbackUrl(scryfallUrl(EN_ID)))
++      .not.toBe(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal"));
++  });
++
++  it("offers no fallback rung for mapped locales or art crops", async () => {
++    const mod = await loadScryfallModule();
++    global.fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 404 }));
++    await mod.loadLocaleArt("de");
++    // A mapped locale already resolves a usable per-printing URL from its
++    // sidecar, so it takes no ladder; art crops are not rewritten at all.
++    expect(mod.derivedArtFallbackUrl(scryfallUrl(EN_ID))).toBeUndefined();
++
++    await mod.loadLocaleArt("en");
++    expect(mod.derivedArtFallbackUrl(scryfallUrl(EN_ID))).toBeUndefined();
++
++    await mod.loadLocaleArt("zhs");
++    expect(mod.derivedArtFallbackUrl(scryfallUrl(EN_ID, "art_crop"))).toBeUndefined();
++  });
++
++  it("is a no-op for English", async () => {
++    const mod = await loadScryfallModule();
++    await mod.loadLocaleArt("en");
++
++    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, "normal")).toBe(scryfallUrl(EN_ID));
++    expect(mod.isLocaleArtReady("en")).toBe(true);
++  });
++
++  it("resolves the art locale from the UI language and the preference", () => {
++    // "auto" is the pre-existing behaviour: art follows the UI language.
++    expect(resolveArtLanguage("de", "auto")).toBe("de");
++    expect(resolveArtLanguage("en", "auto")).toBe("en");
++    expect(resolveArtLanguage("de", undefined)).toBe("de");
++    // An explicit choice is independent of the UI language — the whole point.
++    expect(resolveArtLanguage("en", "zhs")).toBe("zhs");
++    expect(resolveArtLanguage("ja", "zhs")).toBe("zhs");
++    // A stale or hand-edited persisted value degrades to "auto", never to a
++    // locale no loader can satisfy.
++    expect(resolveArtLanguage("fr", "klingon")).toBe("fr");
++    expect(resolveArtLanguage("fr", "")).toBe("fr");
++  });
++});
++
++/**
++ * Positional invariant of the derived-locale ladder.
++ *
++ * `advanceFailedSource` walks a ladder in array order and stops at the first
++ * `{kind: "fallback", src: null}` it reaches, and `VisualPackRepository` always
++ * closes a ladder with that sentinel. So an English rung appended *after* the
++ * sentinel is unreachable dead code — the walk terminates one step early and a
++ * printing with no Chinese art renders the text placeholder instead of the
++ * English art sitting in the array. These cases pin the splice position, which a
++ * plain "the source is present" assertion would not catch.
++ */
++/**
++ * The derived locale's English rung must be attached by the asset funnel, and
++ * derived from the PRE-localization URL.
++ *
++ * Regression for a real defect: the rung was attached by `useCardImage`'s
++ * override paths only, so a card taking the ordinary path (`fetchCardImageAsset`
++ * with no art preferences) had no second ladder step at all — its Chinese image
++ * 404'd straight past the English art and rendered the text placeholder. The
++ * first attempt at the fix then derived the rung from the already-localized URL,
++ * and `derivedArtSource` returns null for any host but `cards.scryfall.io`, so it
++ * silently produced undefined again.
++ *
++ * `Temple of Mystery` and `Time Wipe` are the reported cases: both have a live
++ * Scryfall image and no Simplified-Chinese one.
++ */
++describe("derived locale fallback on the asset funnel", () => {
++  const ORACLE = "7e26f0b7-20e6-46d5-8130-d98c14d6aa29";
++  const STORED_NORMAL =
++    "https://cards.scryfall.io/normal/front/2/5/258077cf-edef-40fe-ab46-03c965ebe990.jpg?1783903715";
++  // The loader keys by lowercased oracle_id and needs face_names for the
++  // oracle-id + face-name lookup, so this is the shape it actually parses.
++  const ENTRY = {
++    name: "Temple of Mystery",
++    oracle_id: ORACLE,
++    face_names: ["temple of mystery"],
++    mana_cost: "{1}",
++    cmc: 1,
++    type_line: "Land",
++    colors: [],
++    color_identity: [],
++    keywords: [],
++    layout: "normal",
++    faces: [{
++      normal: STORED_NORMAL,
++      art_crop: "https://cards.scryfall.io/art_crop/front/2/5/258077cf-edef-40fe-ab46-03c965ebe990.jpg",
++    }],
++  };
++  const stubData = () => jsonResponse({ [ORACLE]: ENTRY });
++
++  beforeEach(() => {
++    vi.restoreAllMocks();
++  });
++
++  it("attaches the English rung to an asset built from a stored entry", async () => {
++    const mod = await loadScryfallModule();
++    global.fetch = vi.fn(() => Promise.resolve(stubData()));
++    await mod.loadLocaleArt("zhs");
++
++    const asset = await mod.fetchCardImageAssetByOracleId(
++      ORACLE, "Temple of Mystery", "normal",
++    );
++
++    // The preferred rung is Chinese, and the fallback is its English twin at the
++    // same printing id — which is exactly what must be reachable on a 404.
++    expect(asset.src).toContain("images.mtgch.com/zhs/");
++    expect(asset.fallbackSrc).toBe(
++      "https://images.mtgch.com/sf/normal/front/2/5/258077cf-edef-40fe-ab46-03c965ebe990.webp",
++    );
++    // Non-vacuity: an unset rung is the defect this pins.
++    expect(asset.fallbackSrc).not.toBeUndefined();
++    expect(asset.fallbackSrc).not.toBe(asset.src);
++  });
++
++  it("derives no rung in English, where the base URL is already the rung", async () => {
++    const mod = await loadScryfallModule();
++    global.fetch = vi.fn(() => Promise.resolve(stubData()));
++    await mod.loadLocaleArt("en");
++
++    const asset = await mod.fetchCardImageAssetByOracleId(
++      ORACLE, "Temple of Mystery", "normal",
++    );
++
++    expect(asset.src).toBe(STORED_NORMAL);
++    expect(asset.fallbackSrc).toBeUndefined();
++  });
++});
++
++/**
++ * Tokens need the derived locale's English rung for the same reason cards do,
++ * and need it more often.
++ *
++ * Regression: the token path resolves through `resolveImageUrl` (a pure string
++ * function) rather than `resolveImageAsset`, so attaching the rung only at the
++ * asset funnel left tokens without one. Measured across Doctor Who's 64 tokens,
++ * 32 have a Chinese image and all 64 have an English one — so half of them hit
++ * the missing rung and rendered a broken tile instead of the English token.
++ */
++describe("token assets carry the derived locale rung", () => {
++  const TOKEN_ID = "87d9dfbb-1bd8-4e7b-9945-498fde093d6c";
++
++  const tokenTable = () => jsonResponse({
++    [`scryfall:${TOKEN_ID}`]: {
++      name: "Copy",
++      face_names: ["copy"],
++      layout: "token",
++      faces: [{
++        normal: `https://cards.scryfall.io/normal/front/8/7/${TOKEN_ID}.jpg`,
++        art_crop: `https://cards.scryfall.io/art_crop/front/8/7/${TOKEN_ID}.jpg`,
++      }],
++      scryfall_id: TOKEN_ID,
++    },
++  });
++
++  beforeEach(() => {
++    vi.restoreAllMocks();
++  });
++
++  it("attaches the rung beside the Chinese source", async () => {
++    const mod = await loadScryfallModule();
++    global.fetch = vi.fn(() => Promise.resolve(tokenTable()));
++    await mod.loadLocaleArt("zhs");
++
++    const asset = await mod.fetchTokenImageAssetByRef(
++      { scryfall_id: TOKEN_ID, face_name: "Copy" } as never, "normal",
++    );
++
++    expect(asset).not.toBeNull();
++    expect(asset!.src).toContain("images.mtgch.com/zhs/");
++    expect(asset!.fallbackSrc).toBe(
++      `https://images.mtgch.com/sf/normal/front/8/7/${TOKEN_ID}.webp`,
++    );
++    // The rung is what a token whose Chinese art does not exist walks to.
++    const extra = mod.assetFallbackSources(asset!.src!, asset!.fallbackSrc, "normal");
++    expect(extra.map((source) => source.src)).toEqual([asset!.fallbackSrc]);
++  });
++
++  it("attaches no rung in English, where the base URL is the image", async () => {
++    const mod = await loadScryfallModule();
++    global.fetch = vi.fn(() => Promise.resolve(tokenTable()));
++    await mod.loadLocaleArt("en");
++
++    const asset = await mod.fetchTokenImageAssetByRef(
++      { scryfall_id: TOKEN_ID, face_name: "Copy" } as never, "normal",
++    );
++
++    expect(asset!.src).toBe(`https://cards.scryfall.io/normal/front/8/7/${TOKEN_ID}.jpg`);
++    expect(asset!.fallbackSrc).toBeUndefined();
++  });
++});
++
++describe("derived art ladder ordering", () => {
++  const remote = (src: string) => ({ kind: "remote" as const, src });
++  const terminal = { kind: "fallback" as const, src: null };
++
++  it("places the extra rung directly before the terminal fallback", () => {
++    const ladder = insertBeforeTerminalFallback(
++      [remote("zhs.webp"), terminal],
++      [remote("sf.webp")],
++    );
++
++    expect(ladder.map((source) => source.src)).toEqual(["zhs.webp", "sf.webp", null]);
++    // The negative half: appending would also "contain" the English rung.
++    expect(ladder[ladder.length - 1]).toEqual(terminal);
++  });
++
++  it("keeps an installed pack ahead of both remote rungs", () => {
++    // The installed arm's identity fields are branded, so they go through the
++    // same constructors production uses rather than being cast.
++    const ladder = insertBeforeTerminalFallback(
++      [
++        {
++          kind: "installed" as const,
++          src: "pack.jpg",
++          assetKey: assetKey("asset:v1:canonical_card:AA"),
++          packId: packId("core"),
++          catalogRoot: catalogRoot("a".repeat(64)),
++        },
++        remote("zhs.webp"),
++        terminal,
++      ],
++      [remote("sf.webp")],
++    );
++
++    // An installed pack is an explicit user choice with bytes on disk, so it
++    // stays first; the derived rung only ever displaces the terminal sentinel.
++    expect(ladder.map((source) => source.src)).toEqual(["pack.jpg", "zhs.webp", "sf.webp", null]);
++  });
++
++  it("returns the same array when there is nothing to insert", () => {
++    const ladder = [remote("cards.scryfall.io/normal/front/a/a/card.jpg"), terminal];
++
++    // Identity, not equality: every mapped locale takes this path on every card,
++    // so it must not allocate a fresh ladder.
++    expect(insertBeforeTerminalFallback(ladder, [])).toBe(ladder);
++  });
++
++  it("appends when a ladder has no terminal fallback", () => {
++    // Installed-only ladders can reach the render path without a sentinel; the
++    // walk then ends by exhausting the array, so appending is correct there.
++    const ladder = insertBeforeTerminalFallback([remote("zhs.webp")], [remote("sf.webp")]);
++
++    expect(ladder.map((source) => source.src)).toEqual(["zhs.webp", "sf.webp"]);
++  });
++});
++
++/**
++ * Guard for the derived branch's early return.
++ *
++ * `localizeImageUrl` now asks `isDerivedArtLocale` before consulting the sidecar
++ * map, and `derivedArtSource` returns null for `art_crop`. If that guard ever
++ * grew to cover the mapped locales — or if the derived short-circuit stopped
++ * falling through — the six existing languages would silently lose part of their
++ * art vocabulary. These cases assert the mapped path still resolves per size,
++ * which is exactly what a too-greedy guard would break while the `normal`-size
++ * tests above kept passing.
++ */
++describe("mapped locales keep their full size vocabulary", () => {
++  const EN_ID = "0dbac7ce-a6fa-466e-b6ba-173cf2dec98e";
++  const DE_ID = "345a1cf0-e4de-42a9-9c72-ed16826b9067";
++
++  const cardUrl = (id: string, size = "normal", face = "front", query = "") =>
++    `https://cards.scryfall.io/${size}/${face}/${id[0]}/${id[1]}/${id}.jpg${query}`;
++
++  const printing = (id: string): PrintingEntry => ({
++    id,
++    set: "mid",
++    set_name: "Innistrad: Midnight Hunt",
++    collector_number: "7",
++    released_at: "2021-09-24",
++    border_color: "black",
++    frame_effects: [],
++    full_art: false,
++    faces: [
++      {
++        small: cardUrl(id, "small"),
++        normal: cardUrl(id),
++        art_crop: cardUrl(id, "art_crop"),
++      },
++      {
++        small: cardUrl(id, "small", "back"),
++        normal: cardUrl(id, "normal", "back"),
++        art_crop: cardUrl(id, "art_crop", "back"),
++      },
++    ],
++  });
++
++  const localized = {
++    id: DE_ID,
++    faces: [
++      {
++        small: cardUrl(DE_ID, "small"),
++        normal: cardUrl(DE_ID),
++        art_crop: cardUrl(DE_ID, "art_crop"),
++      },
++      {
++        small: cardUrl(DE_ID, "small", "back"),
++        normal: cardUrl(DE_ID, "normal", "back"),
++        art_crop: cardUrl(DE_ID, "art_crop", "back"),
++      },
++    ],
++  };
++
++  beforeEach(() => {
++    vi.restoreAllMocks();
++  });
++
++  it.each([
++    ["small", cardUrl(DE_ID, "small")],
++    ["normal", cardUrl(DE_ID)],
++    ["art_crop", cardUrl(DE_ID, "art_crop")],
++    ["large", cardUrl(DE_ID)],
++  ] as const)("still swaps %s onto the localized printing", async (size, expected) => {
++    const mod = await loadScryfallModule();
++    global.fetch = vi.fn().mockResolvedValue(
++      new Response(JSON.stringify({ [EN_ID]: localized }), {
++        status: 200,
++        headers: { "Content-Type": "application/json" },
++      }),
++    );
++    await mod.loadLocaleArt("de");
++
++    expect(mod.resolvePrintingImageUrl(printing(EN_ID), 0, size)).toBe(expected);
++  });
++
++  it("offers no derived rung for a mapped locale", async () => {
++    const mod = await loadScryfallModule();
++    global.fetch = vi.fn().mockResolvedValue(
++      new Response(JSON.stringify({ [EN_ID]: localized }), { status: 200 }),
++    );
++    await mod.loadLocaleArt("de");
++
++    // A mapped locale resolves a usable per-printing URL from its sidecar, so it
++    // takes no second host rung; the value stays undefined rather than inheriting
++    // any derived-locale behaviour.
++    expect(mod.derivedArtFallbackUrl(cardUrl(EN_ID))).toBeUndefined();
++    expect(isDerivedArtLocale("de")).toBe(false);
++    expect(isDerivedArtLocale("zhs")).toBe(true);
++    // The vocabulary is the discriminator, so it must not accept the UI-only or
++    // mapped codes as derived ones.
++    expect(isDerivedArtLocale("pl")).toBe(false);
++    expect(isDerivedArtLocale("en")).toBe(false);
++  });
++});
+diff --git a/client/src/services/cardArtLocale.ts b/client/src/services/cardArtLocale.ts
+new file mode 100644
+index 000000000..0f801f10f
+--- /dev/null
++++ b/client/src/services/cardArtLocale.ts
+@@ -0,0 +1,54 @@
++/**
++ * Card-art locale vocabulary: which languages art can be rendered in, and how a
++ * stored preference resolves to one.
++ *
++ * Deliberately its own module with NO imports, because two very different
++ * consumers need it: the card-image pipeline in `scryfall.ts`, and the
++ * preference store / settings UI, which must not depend on the image module at
++ * all. Keeping the vocabulary here is also what keeps the many tests that mock
++ * `scryfall.ts` from having to restate it — the mock replaces the image module,
++ * not the locale domain.
++ *
++ * This set is NOT `SUPPORTED_LNGS` (the UI languages) and the two are not nested
++ * in either direction:
++ *   - `zhs` — Simplified Chinese — has art but no UI catalog. Scryfall has no
++ *     Simplified-Chinese printings whatsoever, so this art comes from a
++ *     community card database; there is no Chinese translation of the chrome.
++ *   - `pl` has a UI catalog but no localized art: MTGJSON carries zero Polish
++ *     `foreignData` and Scryfall rejects `lang:pl` outright.
++ * Coupling the two sets would therefore force either a full Chinese translation
++ * catalog or no Chinese cards, which is why a player picks card-art language
++ * separately from interface language.
++ */
++export const ART_LANGUAGES = ["en", "es", "fr", "de", "it", "pt", "pl", "ja", "zhs"] as const;
++export type ArtLanguage = (typeof ART_LANGUAGES)[number];
++
++export function isArtLanguage(value: unknown): value is ArtLanguage {
++  return typeof value === "string" && (ART_LANGUAGES as readonly string[]).includes(value);
++}
++
++/** Card-art locale codes whose art is DERIVED from the English printing id
++ *  rather than looked up in a generated `scryfall-images.v2.<lng>.json` sidecar. */
++export type DerivedArtLocale = "zhs";
++
++const DERIVED_ART_LOCALES = new Set<string>(["zhs"]);
++
++export function isDerivedArtLocale(lang: string): lang is DerivedArtLocale {
++  return DERIVED_ART_LOCALES.has(lang);
++}
++
++/**
++ * The art locale to resolve in, given the UI language and the art-language
++ * preference (`"auto"` = follow the UI).
++ *
++ * Total and never-throwing: an unrecognized preference falls back to `"auto"`
++ * rather than producing a locale no loader can satisfy, which is what makes it
++ * safe to call on a value that came out of localStorage.
++ */
++export function resolveArtLanguage(
++  language: string,
++  artLanguage: string | undefined,
++): string {
++  if (artLanguage === "auto" || artLanguage === undefined) return language;
++  return isArtLanguage(artLanguage) ? artLanguage : language;
++}
+diff --git a/client/src/services/cardTextLocale.ts b/client/src/services/cardTextLocale.ts
+new file mode 100644
+index 000000000..945e8e072
+--- /dev/null
++++ b/client/src/services/cardTextLocale.ts
+@@ -0,0 +1,91 @@
++/**
++ * Card-TEXT locale vocabulary: which languages a card's name / Oracle text /
++ * type line can be displayed in, and how a stored preference resolves to one.
++ *
++ * A THIRD axis, independent of both the interface language (`SUPPORTED_LNGS`) and
++ * the card-art language (`ART_LANGUAGES`). The three sets are not nested in any
++ * direction, and card TEXT is the one that needs its own switch:
++ *
++ *   - `zhs` has text (from the 大学院废墟 dataset, via
++ *     `scripts/gen-zhs-card-text.mjs`) and art, but NO UI catalog. A player who
++ *     wants to read Chinese cards is not thereby asking for a Chinese interface —
++ *     and until a chrome translation exists, coupling the two would mean either
++ *     no Chinese cards or a broken UI.
++ *   - `pl` has a UI catalog and no localized card text at all (MTGJSON carries
++ *     zero Polish `foreignData`), so it cannot appear here.
++ *
++ * The loaders tolerate every value: `ensureCardLocale` (engineRuntime.ts)
++ * resolves a missing sidecar to an empty map and callers fall back to English
++ * PER FIELD. So an unrecognized or unpublished locale degrades to English text
++ * rather than breaking a card.
++ */
++
++/** Locales the app ships a card-content sidecar for (`card-data.<lng>.json`).
++ *  `en` is listed because it is a selectable answer, not because a sidecar
++ *  exists — English is the card data itself, so `ensureCardLocale("en")` is a
++ *  deliberate no-op. */
++export const CARD_TEXT_LANGUAGES = [
++  "en",
++  "es",
++  "fr",
++  "de",
++  "it",
++  "pt",
++  "ja",
++  "zhs",
++] as const;
++export type CardTextLanguage = (typeof CARD_TEXT_LANGUAGES)[number];
++
++export function isCardTextLanguage(value: unknown): value is CardTextLanguage {
++  return typeof value === "string" && (CARD_TEXT_LANGUAGES as readonly string[]).includes(value);
++}
++
++/** Card-text language, or `"auto"` to follow the interface language. */
++export type CardTextLanguagePreference = "auto" | CardTextLanguage;
++
++/**
++ * Reduce an untrusted (persisted or user-supplied) value to a legal card-text
++ * preference. Anything unrecognized becomes `"auto"` — the behaviour the app had
++ * before this preference existed — so a stale or hand-edited blob can never
++ * select a locale no sidecar can satisfy.
++ */
++export function normalizeCardTextLanguage(value: unknown): CardTextLanguagePreference {
++  if (value === "auto") return "auto";
++  return isCardTextLanguage(value) ? value : "auto";
++}
++
++/**
++ * `normalizeCardTextLanguage` for a value read out of PERSISTED state, where
++ * `undefined` means "this blob predates the preference" rather than "invalid".
++ *
++ * The distinction is load-bearing here because `"auto"` resolves to the INTERFACE
++ * language, and the interface has no Chinese catalog (`SUPPORTED_LNGS` contains no
++ * `zhs`). So an absent field normalized to `"auto"` can never reach the Chinese
++ * sidecar: every install that saved preferences before this preference existed
++ * would silently lose card-text localization — which is this fork's whole point.
++ * Falling back to `current` keeps the fork's default for an upgrade and an
++ * explicit choice for anyone who already made one.
++ */
++export function restoreCardTextLanguage(
++  value: unknown,
++  current: CardTextLanguagePreference,
++): CardTextLanguagePreference {
++  return value === undefined ? current : normalizeCardTextLanguage(value);
++}
++
++/**
++ * The card-text locale to resolve in, given the interface language and the
++ * preference (`"auto"` = follow the interface).
++ *
++ * Total and never-throwing, mirroring `resolveArtLanguage`: an unrecognized
++ * preference falls back to the interface language rather than producing a locale
++ * the sidecar loader cannot satisfy, which is what makes it safe to call on a
++ * value that came out of localStorage.
++ */
++export function resolveCardTextLanguage(
++  language: string,
++  cardTextLanguage: string | undefined,
++): string {
++  if (cardTextLanguage === "auto" || cardTextLanguage === undefined) return language;
++  return isCardTextLanguage(cardTextLanguage) ? cardTextLanguage : language;
++}
 diff --git a/client/src/services/engineRuntime.ts b/client/src/services/engineRuntime.ts
 index d73973a2c..ba0b989ab 100644
 --- a/client/src/services/engineRuntime.ts
@@ -6090,10 +7847,317 @@ index d73973a2c..ba0b989ab 100644
  
  const cardLocalePromises = new Map<string, Promise<Map<string, LocalizedFace>>>();
 diff --git a/client/src/services/scryfall.ts b/client/src/services/scryfall.ts
-index 0d7619e74..22db17be0 100644
+index 2e980b53f..22db17be0 100644
 --- a/client/src/services/scryfall.ts
 +++ b/client/src/services/scryfall.ts
-@@ -1270,6 +1270,25 @@ function isPlaceholderImageUrl(url: string): boolean {
+@@ -1,5 +1,6 @@
+ import type { GameFormat, TokenImageRef } from "../adapter/types";
+ import { formatMetadata } from "../data/formatRegistry";
++import { isDerivedArtLocale, type DerivedArtLocale } from "./cardArtLocale.ts";
+ import type { CardImageSource, ImageRungs } from "./visualPacks/types.ts";
+ 
+ interface ScryfallImageFace {
+@@ -356,6 +357,9 @@ let desiredArtLang = "en";
+  *
+  * This doubles as the caller's "do I need to load?" gate, so the two meanings
+  * must not diverge.
++ *
++ * A derived locale (`zhs`) satisfies this with an empty map, because its art is
++ * derived from the URL rather than looked up in one — see `loadLocaleArt`.
+  */
+ export function isLocaleArtReady(lang: string): boolean {
+   return lang === "en" ? localeArtResolved === null : localeArtResolved?.lang === lang;
+@@ -366,6 +370,14 @@ export function isLocaleArtReady(lang: string): boolean {
+  * immediately. A missing file (404 for a locale not yet published) resolves to an
+  * empty map, so every card falls back to English art — localized art is
+  * best-effort display data, never a hard dependency.
++ *
++ * A derived locale (`zhs`) installs the same way but *without* a fetch: its art
++ * is addressed by the English printing id the caller already has, so there is no
++ * sidecar to download. The empty map is the truthful value — `localizeImageUrl`
++ * reads the locale, not the map, on that branch — and installing it is what flips
++ * `isLocaleArtReady`, which is what releases the render path from its
++ * `…:pending` cache key. Returning early *without* installing would leave every
++ * card stuck in the loading state forever.
+  */
+ export function loadLocaleArt(lang: string): Promise<Map<string, LocalizedArtEntry>> {
+   desiredArtLang = lang;
+@@ -373,6 +385,15 @@ export function loadLocaleArt(lang: string): Promise<Map<string, LocalizedArtEnt
+     localeArtResolved = null;
+     return Promise.resolve(new Map<string, LocalizedArtEntry>());
+   }
++  if (isDerivedArtLocale(lang)) {
++    const map = new Map<string, LocalizedArtEntry>();
++    localeArtResolved = { lang, map };
++    // The availability set is per locale and may have been resolved for a
++    // different one; drop it so the next lookup re-reads.
++    // The availability table is gone: a derived locale rewrites unconditionally
++    // and lets the CDN 404 drive the ladder, so there is nothing to invalidate.
++    return Promise.resolve(map);
++  }
+   let promise = localeArtPromises.get(lang);
+   if (!promise) {
+     // Same shape as `ensureCardLocale` (engineRuntime.ts), the content-sidecar
+@@ -560,6 +581,13 @@ export const IMAGE_SIZE_WIDTHS: Record<"small" | "normal", number> = {
+  * `errors.scryfall.com/soon.jpg` placeholder (one) — the latter must stay
+  * byte-identical or `isPlaceholderImageUrl`'s `===` stops gating the
+  * printing-fallback chain.
++ *
++ * A derived locale's CDN is deliberately NOT recognized here. Its URLs carry an
++ * extra language prefix, and treating that shape as sized would erase a
++ * distinction upstream relies on: six path segments is asserted to be
++ * non-derivable precisely so malformed input cannot acquire a ladder. Its size
++ * is therefore passed explicitly to the one consumer that needs it
++ * (`assetFallbackSources`) rather than inferred from the URL.
+  */
+ function splitSizedImageUrl(
+   url: string | null | undefined,
+@@ -593,11 +621,111 @@ export function deriveImageUrl(url: string, size: ImageSize): string {
+   return `${parsed.scheme}://${segments.join("/")}`;
+ }
+ 
++/**
++ * CDN shape for a derived art locale: a community card-image host that mirrors
++ * Scryfall's own path layout one-for-one, so the same printing id addresses the
++ * same art in another language.
++ *
++ * 大学院废墟 (mtgch.com, formerly sbwsz.com) is the Simplified-Chinese card
++ * database; Scryfall has no Simplified-Chinese printings at all, so this host is
++ * the only source for them. Two path prefixes matter:
++ *
++ *   https://cards.scryfall.io/normal/front/f/2/<uuid>.jpg       ← base URL
++ *   https://images.mtgch.com/zhs/normal/front/f/2/<uuid>.webp    ← 简体中文
++ *   https://images.mtgch.com/sf/normal/front/f/2/<uuid>.webp     ← its English art
++ *
++ * `zhs` is a *per-printing* lookup, not a per-card one: a printing with no
++ * Simplified-Chinese run answers 404 on the `zhs` path while `/sf/` and the
++ * base URL both still serve the English art. That 404 is the only availability
++ * signal — the host exposes no index and no API — which is why the render path
++ * needs a real fallback rung rather than a version check.
++ *
++ * Measured against the live host: `small` (146px), `normal` (488×680, the same
++ * pixels Scryfall serves) and `large` (672×936) exist per face, front and back
++ * alike, and are WebP rather than JPEG. `art_crop` exists ONLY on `/sf/` — see
++ * `derivedArtSource` for why an art crop is nevertheless left alone.
++ */
++/** The Scryfall CDN host every stored art URL is built on. */
++const SCRYFALL_IMAGE_HOST = "cards.scryfall.io";
++
++/** The single host a derived art locale's CDN lives on. */
++const DERIVED_ART_HOST = "images.mtgch.com";
++
++export interface DerivedArtSource {
++  /** URL for a five-segment Scryfall image URL, or null when this rung does not exist. */
++  readonly url: string;
++  /** The English-art rung of the same host, used when `url` 404s. */
++  readonly fallback: string;
++}
++
++/**
++ * Rewrite a five-segment Scryfall image URL onto a derived locale's CDN, or
++ * return null when this locale has no rung for that URL.
++ *
++ * Reuses `splitSizedImageUrl` for the same reason `deriveImageUrl` does: the
++ * base URL is the only input the app has, and anything that is not a sized card
++ * image — the card back, the `errors.scryfall.com` placeholder, a test mock —
++ * must come back untouched rather than be rewritten into another host's path.
++ *
++ * **The rewrite is UNCONDITIONAL and keeps the SAME printing id.** The CDN
++ * localizes community art under the English printing's id, so a card's Chinese
++ * image is the same id on another host, and `art_crop` — the illustration alone,
++ * which carries no language — is the same id on that host's language-neutral
++ * prefix.
++ *
++ * That is the whole design, and it is deliberately not "look up which printings
++ * have Chinese art". Asking the question requires an answer up front, the answer
++ * is not knowable without either a ~1.6 MB generated table or a probe per
++ * printing, and — the reason this was rewritten — an answer that has to be
++ * *chosen* per caller is an answer two callers can disagree about. Deciding
++ * nothing and letting the CDN's own 404 drive the ladder (see `fallback`) makes
++ * a card's identity the same for every zone by construction, and drops the table
++ * and the probe entirely.
++ *
++ * The trailing `?<timestamp>` is dropped, matching `localizeImageUrl`: it is the
++ * English printing's cache-buster and names an object this host does not have.
++ */
++function derivedArtSource(url: string, lang: DerivedArtLocale): DerivedArtSource | null {
++  const parsed = splitSizedImageUrl(url);
++  if (!parsed) return null;
++  const [host, size, face, shardA, shardB, filename] = parsed.segments;
++  // Only the Scryfall CDN carries the printing id in the shape this derivation
++  // reads. A URL already on another host keeps its own identity.
++  if (host !== SCRYFALL_IMAGE_HOST) return null;
++  // A UUID contains no `.`, so the first dot always ends the id.
++  const dot = filename.indexOf(".");
++  if (dot < 0) return null;
++  const printingId = filename.slice(0, dot);
++  const base = `https://${DERIVED_ART_HOST}`;
++  const path = `${size}/${face}/${shardA}/${shardB}/${printingId}.webp`;
++  // Written out rather than `lang` interpolated straight in: the prefix is a
++  // third-party path contract, and spelling both keeps them greppable together.
++  //
++  // An art crop goes to the language-neutral prefix directly rather than to the
++  // locale's: the crop is the illustration alone, and this host serves no
++  // `zhs/art_crop` at all (measured 404 — its crop sizes live under `sf/`, at the
++  // same 626x457 the Scryfall crop uses, so the framing does not change). Sending
++  // it to `zhs` first would spend a guaranteed 404 on every hover preview.
++  const primaryPrefix = size === "art_crop" ? "sf" : lang === "zhs" ? "zhs" : "sf";
++  return {
++    url: `${base}/${primaryPrefix}/${path}`,
++    fallback: `${base}/sf/${path}`,
++  };
++}
++
+ /**
+  * Rewrite a Scryfall image URL to the active locale's printing of the same card,
+  * returning the input unchanged when there is no locale loaded, the URL is not a
+  * sized Scryfall URL, or that printing has no localized sibling.
+  *
++ * Two locale families, one funnel:
++ *   - **Mapped** (`de`/`es`/`fr`/`it`/`ja`/`pt`): the English printing id is
++ *     looked up in the loaded sidecar, which names a *different* Scryfall
++ *     printing whose art is already the right language.
++ *   - **Derived** (`zhs`): the same printing id is re-addressed onto another
++ *     host, because Simplified Chinese printings are not on Scryfall at all.
++ *     See `derivedArtSource`.
++ *
+  * Reusing `splitSizedImageUrl` is load-bearing, not stylistic. It rejects
+  * `CARD_BACK_URL` (four path segments) and the `errors.scryfall.com/soon.jpg`
+  * placeholder (one) — and the placeholder MUST come back byte-identical or
+@@ -606,11 +734,15 @@ export function deriveImageUrl(url: string, size: ImageSize): string {
+  * merely found a UUID in the path would rewrite both.
+  *
+  * The trailing `?<timestamp>` is dropped: it is the *English* printing's
+- * cache-buster and means nothing for a different Scryfall object. Omitting it
+- * costs only the ability to notice a re-scan of that art.
++ * cache-buster and means nothing for a different Scryfall object (mapped) or for
++ * another host (derived). Omitting it costs only the ability to notice a re-scan
++ * of that art.
+  */
+ function localizeImageUrl(url: string): string {
+   if (!localeArtResolved) return url;
++  if (isDerivedArtLocale(localeArtResolved.lang)) {
++    return derivedArtSource(url, localeArtResolved.lang)?.url ?? url;
++  }
+   const parsed = splitSizedImageUrl(url);
+   if (!parsed) return url;
+   // segments: [host, size, face, id[0], id[1], "<id>.jpg?<timestamp>"]
+@@ -631,6 +763,34 @@ function localizeImageUrl(url: string): string {
+   return localizedUrl ?? url;
+ }
+ 
++/**
++ * The English-art rung a derived locale falls back to when its own rung 404s,
++ * or undefined when the active locale has no fallback ladder.
++ *
++ * Takes the SAME input as `localizeImageUrl` — a base Scryfall URL — and returns
++ * the second rung, so a caller that has just resolved a URL can ask for the rung
++ * that replaces it on failure without knowing how the derivation works.
++ *
++ * This is the render path's half of `derivedArtSource`: `localizeImageUrl`
++ * returns only the preferred URL, and the hook needs the second rung as a real
++ * `CardImageSource` so `CardImage`'s existing `onError` → `advanceFailedSource`
++ * walk lands on English art instead of the text placeholder. That matters more
++ * than it looks: the 404 is per *printing*, so a Chinese player routinely hits
++ * cards whose Chinese run does not exist (older sets, promos, the tail of a new
++ * set), and without this rung every one of them would render as a placeholder.
++ *
++ * Returns undefined for mapped locales — their own sidecar already resolves a
++ * usable URL per printing — so this changes nothing for the six existing
++ * languages. `fallback === url` is also reported as undefined: a ladder whose
++ * rungs are the same URL would burn a retry on an asset already known broken.
++ */
++export function derivedArtFallbackUrl(url: string): string | undefined {
++  if (!localeArtResolved || !isDerivedArtLocale(localeArtResolved.lang)) return undefined;
++  const source = derivedArtSource(url, localeArtResolved.lang);
++  if (!source || source.fallback === source.url) return undefined;
++  return source.fallback;
++}
++
+ /**
+  * Resolve one stored local face to a URL for the requested size.
+  *
+@@ -666,6 +826,14 @@ export interface CardImageAsset {
+   isRotated: boolean;
+   source: CardImageSource;
+   rungs?: ImageRungs;
++  /**
++   * Second rung for a derived art locale, or undefined when there is none.
++   *
++   * Carried on the asset rather than derived at render time because only the
++   * locale-aware code above knows whether `src` is a derived-host URL whose
++   * availability is unknown. See `derivedArtFallbackUrl`.
++   */
++  fallbackSrc?: string;
+   semantic: {
+     oracleId?: string;
+     englishPrintingId?: string;
+@@ -681,6 +849,34 @@ function remoteImageSource(src: string, size: ImageSize): { source: CardImageSou
+   return { source: { kind: "remote", src, rungs }, rungs };
+ }
+ 
++/**
++ * The extra ladder rungs a derived art locale contributes beyond the preferred
++ * URL, in order — empty for every other locale, and for any URL that has no
++ * derived rung.
++ *
++ * `size` is passed in rather than read back off `fallbackSrc`.
++ * `imageUrlSize`/`deriveImageUrl` deliberately recognize only Scryfall's flat
++ * `/size/face/…` shape; a derived locale's CDN puts a language prefix in front
++ * of the size, and admitting that shape would erase a distinction upstream
++ * relies on — its tests assert six path segments is NOT size-derivable, so
++ * malformed input cannot acquire a responsive ladder. The caller already knows
++ * which rung it asked for, so it says so instead of the URL being re-parsed.
++ *
++ * Kept separate from `assetImageSources` so a caller that already has a resolved
++ * ladder can append without rebuilding it, and so the no-derived-locale path
++ * touches nothing: the six mapped languages produce `[]` here regardless of what
++ * the asset carries.
++ */
++export function assetFallbackSources(
++  src: string,
++  fallbackSrc: string | undefined,
++  size: ImageSize,
++): CardImageSource[] {
++  if (!fallbackSrc || fallbackSrc === src) return [];
++  const { source } = remoteImageSource(fallbackSrc, size);
++  return [source];
++}
++
+ function isSidewaysLayout(layout: string | undefined): boolean {
+   return layout === "split";
+ }
+@@ -1039,12 +1235,29 @@ function resolveImageAsset(
+   size: ImageSize,
+   diagnosticName: string,
+ ): CardImageAsset {
++  const face = entry.faces[faceIndex] ?? entry.faces[0];
++  // Derived BEFORE localization, and from the pre-localization URL.
++  //
++  // The rung this returns is the English art of the SAME printing, so the URL it
++  // must be derived from is the Scryfall CDN one — `derivedArtSource` reads the
++  // printing id out of `cards.scryfall.io` paths and returns null for anything
++  // else. Deriving from the already-localized URL silently yielded undefined and
++  // the ladder lost its second step, which is exactly the failure this rung
++  // exists to prevent.
++  const storedSrc = face?.normal ?? null;
++  const fallbackSrc = storedSrc ? derivedArtFallbackUrl(storedSrc) : undefined;
+   const src = resolveImageUrl(entry, faceIndex, size, diagnosticName);
+   const remote = remoteImageSource(src, size);
+   return {
+     src,
+     isRotated: isSidewaysLayout(entry.layout),
+     ...remote,
++    // Attached HERE, at the one funnel every stored-image asset is built
++    // through, rather than at each consumer. Doing it in `useCardImage` covered
++    // only its override paths (tokens, a pinned source printing, an art chain)
++    // and missed this one — the path a card with no art preferences at all
++    // takes.
++    fallbackSrc,
+     semantic: {
+       oracleId: entry.oracle_id.toLowerCase(),
+       faceIndex,
+@@ -1057,6 +1270,11 @@ function isPlaceholderImageUrl(url: string): boolean {
    return url === "https://errors.scryfall.com/soon.jpg";
  }
  
@@ -6102,36 +8166,167 @@ index 0d7619e74..22db17be0 100644
 + * The last resort behind `isPlaceholderImageUrl`: Scryfall names a printing whose
 + * image it does not serve, so this walks the card's printings for one that does.
 + */
-+function resolvePrintingFallback(
-+  oracleId: string,
-+  faceIndex: number,
-+  size: ImageSize,
-+): { id: string; url: string } | null {
-+  const printings = printingsDataResolved?.[oracleId.toLowerCase()] ?? [];
-+  for (const printing of printings) {
-+    if (printing.set === "plst") continue;
-+    const url = resolvePrintingImageUrl(printing, faceIndex, size);
-+    if (url && !isPlaceholderImageUrl(url)) return { id: printing.id, url };
-+  }
-+  return null;
-+}
+ function resolvePrintingFallback(
+   oracleId: string,
+   faceIndex: number,
+@@ -1071,6 +1289,17 @@ function resolvePrintingFallback(
+   return null;
+ }
+ 
++/**
++ * Resolve a card's image, falling back to another printing when the preferred
++ * one has no art at all.
++ *
++ * This is now ONLY the placeholder case: the Scryfall data names a printing whose
++ * image Scryfall itself does not serve (`errors.scryfall.com/soon.jpg`) while
++ * another printing of the same card does. A derived locale no longer reaches
++ * here — it rewrites the printing it was handed and lets the CDN's 404 pick the
++ * rung (see `derivedArtSource`), which needs no table and cannot disagree with
++ * itself.
++ */
+ async function resolveImageAssetWithPrintingFallback(
+   entry: ScryfallDataEntry,
+   faceIndex: number,
+@@ -1078,6 +1307,7 @@ async function resolveImageAssetWithPrintingFallback(
+   diagnosticName: string,
+ ): Promise<CardImageAsset> {
+   const asset = resolveImageAsset(entry, faceIndex, size, diagnosticName);
 +
- /**
-  * Resolve a card's image, falling back to another printing when the preferred
-  * one has no art at all.
+   if (!isPlaceholderImageUrl(asset.src)) return asset;
+ 
+   await loadPrintingsData();
+@@ -1220,6 +1450,15 @@ export async function fetchTokenImageUrl(
+ }
+ 
+ export interface TokenImageAssetByRef {
++  /**
++   * The derived locale's English rung for this token's art, or undefined.
++   *
++   * Tokens need it for the same reason cards do, and they need it MORE often:
++   * measured across Doctor Who's 64 tokens, 32 have a Chinese image and all 64
++   * have the English one, so half of them take the second rung. Without it a
++   * Chinese player sees a broken tile rather than the English token.
++   */
++  fallbackSrc?: string;
+   src: string;
+   faceIndex: number;
+ }
+@@ -1236,7 +1475,14 @@ export async function fetchTokenImageAssetByRef(
+     const faceIndex = ref.face_name
+       ? Math.max(0, idEntry.face_names.indexOf(ref.face_name.toLowerCase()))
+       : 0;
+-    return { src: resolveImageUrl(idEntry, faceIndex, size, idEntry.name), faceIndex };
++    const storedSrc = idEntry.faces[faceIndex]?.normal
++      ?? idEntry.faces[0]?.normal
++      ?? null;
++    return {
++      src: resolveImageUrl(idEntry, faceIndex, size, idEntry.name),
++      faceIndex,
++      fallbackSrc: storedSrc ? derivedArtFallbackUrl(storedSrc) : undefined,
++    };
+   }
+ 
+   if (ref.scryfall_oracle_id) {
+@@ -1246,7 +1492,14 @@ export async function fetchTokenImageAssetByRef(
+       const faceIndex = ref.face_name
+         ? Math.max(0, oracleEntry.face_names.indexOf(ref.face_name.toLowerCase()))
+         : 0;
+-      return { src: resolveImageUrl(oracleEntry, faceIndex, size, oracleEntry.name), faceIndex };
++      const storedSrc = oracleEntry.faces[faceIndex]?.normal
++        ?? oracleEntry.faces[0]?.normal
++        ?? null;
++      return {
++        src: resolveImageUrl(oracleEntry, faceIndex, size, oracleEntry.name),
++        faceIndex,
++        fallbackSrc: storedSrc ? derivedArtFallbackUrl(storedSrc) : undefined,
++      };
+     }
+   }
+ 
+diff --git a/client/src/services/visualPacks/__tests__/candidateKeys.test.ts b/client/src/services/visualPacks/__tests__/candidateKeys.test.ts
+index 019d2cae9..2657d61e9 100644
+--- a/client/src/services/visualPacks/__tests__/candidateKeys.test.ts
++++ b/client/src/services/visualPacks/__tests__/candidateKeys.test.ts
+@@ -88,3 +88,44 @@ describe("semanticCardCandidateGroups", () => {
+     expect(() => encodeCandidateKey(kind, tuple)).toThrow();
+   });
+ });
++
++/**
++ * The locale slot in a `localized_printing` / `localized_alias` key is validated
++ * by SHAPE, not by an enumeration of the locales the app happens to ship a
++ * sidecar for today.
++ *
++ * An enumerated list made every new art language fail here: `cardCandidateGroups`
++ * validates its candidate keys eagerly, so an unlisted code threw out of the
++ * group builder, where the caller's `try`/`catch` turned it into "this language
++ * has no local candidates" — silently disabling localized-pack lookups for it
++ * rather than failing visibly. These cases pin the shape rule so a future
++ * re-narrowing is caught here instead of in the field.
++ */
++describe("candidate key locale domain", () => {
++  const UUID = "0dbac7ce-a6fa-466e-b6ba-173cf2dec98e";
++
++  it.each([
++    ["an established mapped locale", "de"],
++    ["a locale with a UI but no art", "pl"],
++    ["a derived art locale with no UI", "zhs"],
++  ])("accepts %s", (_label, locale) => {
++    const key = encodeCandidateKey("localized_printing", [
++      locale, UUID, 0, "full_card", "normal",
++    ]);
++    expect(decodeCandidateKey(key)).toEqual([
++      "localized_printing", [locale, UUID, 0, "full_card", "normal"],
++    ]);
++  });
++
++  it.each([
++    ["too short", "z"],
++    ["too long", "zhxyn"],
++    ["upper case", "ZH"],
++    ["with a region subtag", "zh-hans"],
++    ["empty", ""],
++  ])("still rejects a locale that is %s", (_label, locale) => {
++    expect(() => encodeCandidateKey("localized_printing", [
++      locale, UUID, 0, "full_card", "normal",
++    ])).toThrow();
++  });
++});
+diff --git a/client/src/services/visualPacks/types.ts b/client/src/services/visualPacks/types.ts
+index 512e69d0b..db1881dbb 100644
+--- a/client/src/services/visualPacks/types.ts
++++ b/client/src/services/visualPacks/types.ts
+@@ -17,12 +17,17 @@ export type OperationId = Brand<string, "OperationId">;
+ const LOWER_HEX_64 = /^[0-9a-f]{64}$/;
+ const LOWER_HEX_32 = /^[0-9a-f]{32}$/;
+ const DECIMAL = /^(0|[1-9][0-9]*)$/;
+-const PACK_ID = /^(complete|core|curated|deck_library|printing:[a-z0-9]{3,6}|locale:(de|es|fr|it|ja|pt):[a-z0-9]{3,6})$/;
++const PACK_ID = /^(complete|core|curated|deck_library|printing:[a-z0-9]{3,6}|locale:[a-z]{2,3}:[a-z0-9]{3,6})$/;
+ const ASSET_KEY = /^asset:v1:(canonical_card|exact_printing|localized_printing|token|card_back|mana_symbol|set_icon):[A-Za-z0-9_-]+$/;
+ const CANDIDATE_KEY = /^candidate:v1:(localized_printing|localized_alias|english_printing|english_alias|oracle|oracle_alias|oracle_face|source_printing|name_face|token_reference|token_alias|card_back|mana_symbol|set_icon):([A-Za-z0-9_-]+)$/;
+ const CANDIDATE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+ const CANDIDATE_SET = /^[a-z0-9]{3,6}$/;
+-const CANDIDATE_LOCALE = /^(de|es|fr|it|ja|pt)$/;
++// Shape, not an enumeration. A locale the catalog holds no rows for simply
++// matches nothing — the key indexes rows that were built with the same code, so
++// an unknown value is inert rather than harmful. Enumerating instead made every
++// new art language (Simplified Chinese `zhs`, already-supported `pl`) throw out
++// of `cardCandidateGroups` and silently disable localized-pack lookups for it.
++const CANDIDATE_LOCALE = /^[a-z]{2,3}$/;
+ 
+ function branded<T extends string>(value: string, pattern: RegExp, name: string): T {
+   if (!pattern.test(value)) throw new Error(`invalid ${name}`);
 diff --git a/client/src/stores/__tests__/preferencesStore.test.ts b/client/src/stores/__tests__/preferencesStore.test.ts
-index 79635cfb0..8dfd3013a 100644
+index 79635cfb0..856d6f278 100644
 --- a/client/src/stores/__tests__/preferencesStore.test.ts
 +++ b/client/src/stores/__tests__/preferencesStore.test.ts
-@@ -381,18 +381,34 @@ describe("preferencesStore", () => {
-   });
- 
+@@ -383,12 +383,14 @@ describe("preferencesStore", () => {
    it("falls back from an unsupported current-version persisted locale", () => {
-+    // Korean, not Chinese: Chinese IS shipped, and a test that used it here would
-+    // stop exercising the fallback the moment the locale was added.
      localStorage.setItem(
        "phase-preferences",
 -      JSON.stringify({ state: { language: "zh-Hans" }, version: 34 }),
++      // Korean, not Chinese: Chinese IS shipped, so a test that used it here
++      // would stop exercising the fallback the moment the locale was added.
 +      JSON.stringify({ state: { language: "ko-KR" }, version: 34 }),
      );
  
@@ -6142,348 +8337,578 @@ index 79635cfb0..8dfd3013a 100644
        usePreferencesStore.getState().language,
      );
    });
+diff --git a/client/src/stores/preferencesStore.ts b/client/src/stores/preferencesStore.ts
+index e6634f101..e1ba692e4 100644
+--- a/client/src/stores/preferencesStore.ts
++++ b/client/src/stores/preferencesStore.ts
+@@ -25,6 +25,11 @@ import type { AIDifficulty } from "../constants/ai";
+ import { DEFAULT_AI_DIFFICULTY } from "../constants/ai";
+ import type { DeckArchetype } from "../services/engineRuntime";
+ import { detectInitialLanguage, normalizeSupportedLng, type SupportedLng } from "../i18n/resources";
++import { isArtLanguage, type ArtLanguage } from "../services/cardArtLocale.ts";
++import {
++  restoreCardTextLanguage,
++  type CardTextLanguagePreference,
++} from "../services/cardTextLocale.ts";
  
-+  it("resolves a Chinese browser tag to the shipped simplified locale", () => {
-+    // Every `zh*` tag maps to `zhs`, because the app serves one Chinese. This is
-+    // what makes the `artLanguage: "auto"` default reach Chinese card art on a
-+    // Chinese install — `auto` follows the interface language.
-+    localStorage.setItem(
-+      "phase-preferences",
-+      JSON.stringify({ state: { language: "zh-Hans" }, version: 34 }),
-+    );
-+
-+    act(() => usePreferencesStore.persist.rehydrate());
-+
-+    expect(usePreferencesStore.getState().language).toBe("zhs");
-+  });
-+
-   it("migrates pre-log-dock preferences to the prior right dock", () => {
-     localStorage.setItem(
-       "phase-preferences",
-diff --git a/client/src/test/fixtures/keyword-payload-wire.json b/client/src/test/fixtures/keyword-payload-wire.json
-index aef6bceef..cb1e56f03 100644
---- a/client/src/test/fixtures/keyword-payload-wire.json
-+++ b/client/src/test/fixtures/keyword-payload-wire.json
-@@ -834,11 +834,14 @@
-     },
-     {
-       "Replicate": {
--        "generic": 2,
--        "shards": [
--          "Red"
--        ],
--        "type": "Cost"
-+        "cost": {
-+          "generic": 2,
-+          "shards": [
-+            "Red"
-+          ],
-+          "type": "Cost"
-+        },
-+        "type": "Mana"
-       }
-     },
-     {
-diff --git a/client/src/viewmodel/__tests__/keywordProps.test.ts b/client/src/viewmodel/__tests__/keywordProps.test.ts
-index 3579dc197..989536930 100644
---- a/client/src/viewmodel/__tests__/keywordProps.test.ts
-+++ b/client/src/viewmodel/__tests__/keywordProps.test.ts
-@@ -56,6 +56,32 @@ describe("getKeywordDetail", () => {
-     expect(getKeywordDetail("Haste")).toBeNull();
-   });
- 
-+  // Regression: `Keyword::Replicate` holds a bare `AbilityCost`, whose serde is
-+  // internally tagged — `{ type: "Mana", cost: {...} }` / `{ type:
-+  // "TapCreatures", ... }`. The sibling cost enums (FlashbackCost, BlitzCost,
-+  // BestowCost) are adjacently tagged and carry their payload under `data`
-+  // instead, so the formatter has to read BOTH keys. Reading only `data` made
-+  // every replicate cost render as `undefined`.
-+  it("formats a bare AbilityCost payload (internally-tagged serde)", () => {
-+    expect(
-+      getKeywordDetail({ Replicate: { type: "Mana", cost: { type: "Cost", shards: ["Red"], generic: 2 } } }),
-+    ).toBe("{2}{R}");
-+    // A non-mana replicate cost (Exterminate!) has no client-side detail text:
-+    // `formatKnownCost` deliberately has no `TapCreatures` arm, because rendering
-+    // it would mean the frontend parsing the cost AST — the engine owns cost
-+    // text. `null` renders the keyword with no detail, not a broken label. The
-+    // mana arm above is the regression this test exists for.
-+    expect(
-+      getKeywordDetail({
-+        Replicate: {
-+          type: "TapCreatures",
-+          requirement: { requirement: "count", count: 1 },
-+          filter: { type: "Typed", type_filters: [{ Subtype: "Dalek" }], controller: "You", properties: [] },
-+        },
-+      }),
-+    ).toBeNull();
-+  });
-+
-   it("formats ManaCost params (internally-tagged serde)", () => {
-     expect(getKeywordDetail({ Equip: { type: "Cost", shards: ["White"], generic: 2 } })).toBe("{2}{W}");
-     expect(getKeywordDetail({ Kicker: { type: "Cost", shards: [], generic: 4 } })).toBe("{4}");
-diff --git a/client/src/viewmodel/keywordProps.ts b/client/src/viewmodel/keywordProps.ts
-index e6211634f..98b4e4ee3 100644
---- a/client/src/viewmodel/keywordProps.ts
-+++ b/client/src/viewmodel/keywordProps.ts
-@@ -343,25 +343,44 @@ const MANA_COST_KEYWORDS = new Set([
-   "Harmonize", "Foretell", "Mutate", "Disturb", "Overload",
-   "Spectacle", "Surge", "Encore", "Entwine", "Outlast", "Scavenge", "Fortify",
-   "Plot", "Offspring", "LevelUp", "Warp", "Sneak", "WebSlinging", "Squad",
--  "Transmute", "Transfigure", "Recover", "Cleave", "Replicate",
-+  "Transmute", "Transfigure", "Recover", "Cleave",
-   "MoreThanMeetsTheEye", "Freerunning", "Specialize",
- ]);
- 
- /**
-- * Keywords whose payload is a `{ type: "Mana", data: ManaCost }` or
-- * `{ type: "NonMana", data: AbilityCost }` cost (FlashbackCost and siblings).
-+ * Keywords whose payload is a mana cost or a non-mana cost, tagged
-+ * `{ type, data }` for the sibling cost enums (FlashbackCost and friends) and
-+ * `{ type, cost }` for a bare `AbilityCost`.
-+ *
-+ * `Replicate` is in this group rather than `MANA_COST_KEYWORDS` because a
-+ * replicate cost is not always mana — Exterminate! prints
-+ * "Replicate—Tap an untapped Dalek you control", which is an
-+ * `AbilityCost::TapCreatures`.
-  */
- const MANA_OR_NON_MANA_COST_KEYWORDS = new Set([
-   "Bestow", "Embalm", "Eternalize", "Cycling", "Flashback", "Escape", "Evoke",
--  "Buyback", "Echo", "Blitz",
-+  "Buyback", "Echo", "Blitz", "Replicate",
- ]);
- 
- /** Keywords whose payload is an AbilityCost. */
- const ABILITY_COST_KEYWORDS = new Set(["CumulativeUpkeep", "Escalate"]);
- 
--function formatManaOrNonManaCost(val: { type: string; data: unknown }): string | null {
--  if (val.type === "Mana") return formatKeywordManaCost(val.data as ManaCost);
--  return formatKeywordAbilityCost(val.data as KeywordAbilityCost);
-+/**
-+ * The cost payload sits under `data` for the adjacent-tagged sibling enums
-+ * (FlashbackCost, BlitzCost, BestowCost, CyclingCost) but under `cost` for a
-+ * bare `AbilityCost`, whose serde is internally tagged
-+ * (`{ type: "Mana", cost: {...} }`). `Keyword::Replicate` is the latter, so both
-+ * keys are read; reading only `data` rendered every replicate cost blank.
-+ */
-+function formatManaOrNonManaCost(val: {
-+  type: string;
-+  data?: unknown;
-+  cost?: unknown;
-+}): string | null {
-+  const payload = val.data ?? val.cost;
-+  if (payload == null) return null;
-+  if (val.type === "Mana") return formatKeywordManaCost(payload as ManaCost);
-+  return formatKeywordAbilityCost(payload as KeywordAbilityCost);
+ /** Literal sentinel for "any deck" in AI deck selection. Mirrors `DeckChoice::Random`
+  *  naming so the preference value is self-describing without a nullable field. */
+@@ -57,6 +62,37 @@ export interface CardArtOverride {
  }
  
- type KeywordAbilityCost = Parameters<typeof formatKnownCost>[0];
-diff --git a/client/src/vite-env.d.ts b/client/src/vite-env.d.ts
-index 8bef21faa..cc7d85689 100644
---- a/client/src/vite-env.d.ts
-+++ b/client/src/vite-env.d.ts
-@@ -34,7 +34,6 @@ interface Window {
- declare const __CARD_DATA_URL__: string;
- declare const __CARD_DATA_LOCALE_URL_TEMPLATE__: string;
- declare const __SCRYFALL_IMAGES_LOCALE_URL_TEMPLATE__: string;
--declare const __SCRYFALL_IMAGES_AVAILABILITY_URL_TEMPLATE__: string;
- declare const __CARD_NAMES_URL__: string;
- declare const __CHANGELOG_URL__: string;
- declare const __CHANGELOG_META_URL__: string;
-diff --git a/client/src/wasm/engine_wasm.d.ts b/client/src/wasm/engine_wasm.d.ts
-index a938895b3..1e6d6c39d 100644
---- a/client/src/wasm/engine_wasm.d.ts
-+++ b/client/src/wasm/engine_wasm.d.ts
-@@ -342,8 +342,9 @@ export function get_stack_pressure(): any;
- export function get_viewer_snapshot_js(player_id: number): any;
- 
- /**
-- * Get the viewer-filtered state, legal actions, interaction projection, and
-- * event slice associated with one engine transition.
-+ * Combined viewer projection and event slice for one engine transition.
-+ * Unlike the legacy state-only endpoint, this path validates the viewer id
-+ * before narrowing it to the engine's representable PlayerId domain.
-  */
- export function get_viewer_transition_snapshot_js(player_id: number, events: any): any;
- 
-diff --git a/client/vite.config.ts b/client/vite.config.ts
-index 1684f1fed..37a05befd 100644
---- a/client/vite.config.ts
-+++ b/client/vite.config.ts
-@@ -212,16 +212,6 @@ function dataFileDefines(mode: string, buildHash: string): Record<string, string
-       process.env.SCRYFALL_IMAGES_LOCALE_URL_TEMPLATE ||
-         (base ? `${base}/scryfall-images.v2.{lng}.json` : "/scryfall-images.v2.{lng}.json"),
-     ),
--    // Measured per-printing art availability for a DERIVED locale, which has no
--    // Scryfall-side localized printing to map to. Same lifecycle as the map
--    // above; a 404 simply leaves the locale with no preference, which is the
--    // pre-existing behaviour.
--    __SCRYFALL_IMAGES_AVAILABILITY_URL_TEMPLATE__: JSON.stringify(
--      process.env.SCRYFALL_IMAGES_AVAILABILITY_URL_TEMPLATE ||
--        (base
--          ? `${base}/scryfall-images.{lng}-available.json`
--          : "/scryfall-images.{lng}-available.json"),
--    ),
-   };
-   for (const filename of manifest) {
-     // "card-names.json" → "__CARD_NAMES_URL__"; "card-data.de.json" →
-diff --git a/client/vitest.config.ts b/client/vitest.config.ts
-index 184c1a7cf..f75cf0c4b 100644
---- a/client/vitest.config.ts
-+++ b/client/vitest.config.ts
-@@ -79,7 +79,6 @@ export default defineConfig({
-       __CARD_DATA_META_URL__: JSON.stringify("/card-data-meta.json"),
-     __CARD_DATA_LOCALE_URL_TEMPLATE__: JSON.stringify("/card-data.{lng}.json"),
-     __SCRYFALL_IMAGES_LOCALE_URL_TEMPLATE__: JSON.stringify("/scryfall-images.v2.{lng}.json"),
--    __SCRYFALL_IMAGES_AVAILABILITY_URL_TEMPLATE__: JSON.stringify("/scryfall-images.{lng}-available.json"),
-     __CHANGELOG_URL__: JSON.stringify("/changelog.json"),
-     __CHANGELOG_META_URL__: JSON.stringify("/changelog-meta.json"),
-     __STATUS_URL__: JSON.stringify("/status.json"),
-diff --git a/scripts/check-card-data-compat.mjs b/scripts/check-card-data-compat.mjs
-new file mode 100644
-index 000000000..774a6529e
---- /dev/null
-+++ b/scripts/check-card-data-compat.mjs
-@@ -0,0 +1,102 @@
-+#!/usr/bin/env node
-+// Card-data / engine-WASM compatibility gate.
-+//
-+// Answers the ONE question that decides whether `./scripts/build-wasm.sh` (a
-+// ~20-minute rebuild) has to run: can the engine currently compiled into
-+// `client/src/wasm/` parse the card data currently on disk?
-+//
-+// The card database is loaded at RUNTIME, but the engine that parses it is
-+// compiled INTO the WASM. So a parser change ships a mismatch only when it
-+// changes a SERIALIZED shape that reaches `card-data.json` — a new `Effect`,
-+// `TargetFilter`, `FilterProp`, `ContinuousModification`, `Keyword`, … variant.
-+// A change that only alters parser LOGIC (which variant gets chosen for a given
-+// sentence), or only the runtime that executes an already-parsed ability, leaves
-+// the shape untouched and needs no rebuild at all.
-+//
-+// Usage (after regenerating card data, BEFORE deciding on a rebuild):
-+//
-+//   node scripts/check-card-data-compat.mjs
-+//   node scripts/check-card-data-compat.mjs --card "The Eleventh Doctor"
-+//
-+// Exit 0 = the built engine parses this card data; no rebuild needed.
-+// Exit 1 = it does not; rebuild the WASM (`./scripts/build-wasm.sh`).
-+//
-+// With `--card`, every `supported` flag in that card's parse tree is printed,
-+// which is the check that matters when the goal is "make card X supported" —
-+// and the one a substring search for "Unimplemented" gets WRONG, because the
-+// coverage tree renders an unimplemented clause under its own label
-+// (`parser-warning-patterns.json` / the `Unimplemented { name }` payload), not
-+// under the literal word.
+ export type CardSizePreference = "small" | "medium" | "large";
++/**
++ * Which language the card ART is rendered in, independently of the UI language.
++ *
++ * The two are separate because the sets differ in both directions: Simplified
++ * Chinese art exists (`zhs`, sourced from a community CDN because Scryfall has no
++ * Simplified-Chinese printings at all) while a Simplified-Chinese UI does not,
++ * and Polish ships a UI with no localized art whatsoever. Coupling them would
++ * force either a full Chinese translation catalog or no Chinese cards.
++ *
++ * `"auto"` is the default and means "follow the UI language", which is exactly
++ * the behaviour the app had before this preference existed — so an existing
++ * player's install is unchanged.
++ */
++export type ArtLanguagePreference = "auto" | ArtLanguage;
 +
-+import { readFile } from "node:fs/promises";
-+import { existsSync } from "node:fs";
-+import { dirname, resolve } from "node:path";
++/**
++ * Reduce an untrusted (persisted or user-supplied) value to a legal art-language
++ * preference. Anything unrecognized becomes `"auto"` — the pre-existing
++ * "follow the UI" behaviour — so a stale or hand-edited blob can never select an
++ * art locale the loaders cannot satisfy.
++ *
++ * No `ArtLanguage`-valued fallback from the current state is needed here: unlike
++ * `language`, every legal value is self-contained and none is a superset of the
++ * others, so a rejected value loses no information.
++ */
++
++export function normalizeArtLanguage(value: unknown): ArtLanguagePreference {
++  if (value === "auto") return "auto";
++  return isArtLanguage(value) ? value : "auto";
++}
++
+ /** How the hover card-preview behaves on desktop.
+  *  "follow" = the preview tracks the cursor (prior fixed behavior, default).
+  *  "side"   = the preview docks to the screen edge so it never covers the board.
+@@ -276,6 +312,14 @@ const LEGACY_COMBAT_PACING_MULTIPLIERS: Record<string, number> = {
+ function buildDefaultPreferences(): PreferencesState {
+   return {
+     language: detectInitialLanguage(),
++    // Follows the interface language. Chinese art is reached by choosing Chinese
++    // as the INTERFACE language (`zhs` is a shipped locale), not by pinning this
++    // preference — see the `zhs` entry in `SUPPORTED_LNGS`.
++    artLanguage: "auto",
++    // This fork ships Chinese card text by default rather than following the
++    // interface language: the interface has no Chinese catalog, so "auto" would
++    // resolve to the (non-Chinese) UI language and the sidecar would never load.
++    cardTextLanguage: "zhs",
+     cardSize: "medium",
+     hudLayout: "inline",
+     followActiveOpponent: true,
+@@ -343,6 +387,15 @@ interface PreferencesState {
+    *  single source of truth; `i18n/index.ts` mirrors changes). Closed union — not
+    *  the open `(string & {})` pattern, since the supported set is fixed. */
+   language: SupportedLng;
++  /** Card-art language, or `"auto"` to follow `language`. Resolution lives in
++   *  `resolveArtLanguage` so the store field stays a plain preference. */
++  artLanguage: ArtLanguagePreference;
++  /** Card-TEXT language (name / Oracle text / type line), or `"auto"` to follow
++   *  `language`. Independent of `artLanguage`: the two sets differ (Polish has a
++   *  UI and no localized text; Chinese has text and art but no UI catalog), so a
++   *  player may read Chinese cards with non-Chinese art or the reverse. Resolution
++   *  lives in `resolveCardTextLanguage` so the store field stays a preference. */
++  cardTextLanguage: CardTextLanguagePreference;
+   cardSize: CardSizePreference;
+   hudLayout: HudLayout;
+   followActiveOpponent: boolean;
+@@ -457,6 +510,8 @@ interface PreferencesState {
+ 
+ interface PreferencesActions {
+   setLanguage: (lng: SupportedLng) => void;
++  setArtLanguage: (lng: ArtLanguagePreference) => void;
++  setCardTextLanguage: (lng: CardTextLanguagePreference) => void;
+   setCardSize: (size: CardSizePreference) => void;
+   setHudLayout: (layout: HudLayout) => void;
+   setFollowActiveOpponent: (enabled: boolean) => void;
+@@ -604,6 +659,10 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+       // Store owns the language; i18n/index.ts subscribes and mirrors it into i18next.
+       setLanguage: (lng) =>
+         set((state) => ({ language: normalizeSupportedLng(lng, state.language) })),
++      // Card art only — deliberately does NOT touch `language`, so a player can
++      // read the UI in English and still play with Chinese cards.
++      setArtLanguage: (lng) => set({ artLanguage: lng }),
++      setCardTextLanguage: (lng) => set({ cardTextLanguage: lng }),
+       setCardSize: (size) => set({ cardSize: size }),
+       setHudLayout: (layout) => set({ hudLayout: layout }),
+       setFollowActiveOpponent: (enabled) => set({ followActiveOpponent: enabled }),
+@@ -1138,6 +1197,15 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+         return {
+           ...migrated,
+           language: normalizeSupportedLng(migrated.language, detectInitialLanguage()),
++          artLanguage: normalizeArtLanguage(migrated.artLanguage),
++          // NOT `normalizeCardTextLanguage`: a blob written before this
++          // preference existed has no field here, and normalizing the absence to
++          // "auto" would resolve to the (never-Chinese) interface language and
++          // silently disable card-text localization. See `restoreCardTextLanguage`.
++          cardTextLanguage: restoreCardTextLanguage(
++            migrated.cardTextLanguage,
++            buildDefaultPreferences().cardTextLanguage,
++          ),
+         };
+       },
+       // Persisted state is external input. Migration only runs when the schema
+@@ -1151,11 +1219,25 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+           ...current,
+           ...saved,
+           language: normalizeSupportedLng(saved.language, current.language),
++          artLanguage: normalizeArtLanguage(saved.artLanguage),
++          // `current` already carries either the fork default or the value this
++          // session loaded, so an absent persisted field must defer to it.
++          cardTextLanguage: restoreCardTextLanguage(
++            saved.cardTextLanguage,
++            current.cardTextLanguage,
++          ),
+           logDockSide: saved.logDockSide === "left" || saved.logDockSide === "right"
+             ? saved.logDockSide
+             : "right",
+         };
+       },
++      // Card art and card text language are no longer pickers, so they must not
++      // survive in storage: a value written while they WERE pickers would keep
++      // overriding the interface language forever, with nothing on screen able to
++      // change it. Dropping them from `partialize` is what retires the stored
++      // values — "follow the interface" is then structural rather than a default
++      // that stale state can defeat.
++      partialize: ({ artLanguage: _art, cardTextLanguage: _text, ...rest }) => rest,
+     },
+   ),
+ );
+diff --git a/scripts/gen-zhs-card-text.mjs b/scripts/gen-zhs-card-text.mjs
+new file mode 100644
+index 000000000..51f68a890
+--- /dev/null
++++ b/scripts/gen-zhs-card-text.mjs
+@@ -0,0 +1,422 @@
++#!/usr/bin/env node
++// Generate the Simplified-Chinese card-content sidecar (`card-data.zhs.json`)
++// from the 大学院废墟 (HeliumOctahelide/magic-cards-zhs) weekly data export.
++//
++// WHY THIS EXISTS: Scryfall publishes no Simplified-Chinese printings at all, so
++// `oracle_gen`'s MTGJSON `foreignData` sweep — the source of every other
++// `card-data.<lng>.json` — can never produce `zhs`. This script fills that one
++// locale from the community dataset instead.
++//
++// It is deliberately a STANDALONE script rather than part of `oracle-gen`:
++// `card-data.json` already carries `scryfall_oracle_id` for every face, so the
++// join needs no engine code, and running it costs seconds instead of a
++// `tool`-profile engine rebuild.
++//
++// The sidecar also carries card RULINGS. The engine serves those from MTGJSON in
++// English and exposes no id for them, so they are joined by NORMALIZED English
++// text rather than by key — see `normalizeForMatch`.
++//
++// Usage:
++//   node scripts/gen-zhs-card-text.mjs                    # pinned release
++//   node scripts/gen-zhs-card-text.mjs --release data-2026-10-04
++//   node scripts/gen-zhs-card-text.mjs --all-stages       # include stage 0
++//   node scripts/gen-zhs-card-text.mjs --skip-rulings     # text fields only
++//   node scripts/gen-zhs-card-text.mjs --strict-ruling-stage  # drop stage-0 rulings
++//   node scripts/gen-zhs-card-text.mjs --dry-run          # report, write nothing
++//
++// Output: client/public/card-data.zhs.json
++//   { "<lowercased english name>": { name, oracle_text, type_line } }
++//   — the exact shape `oracle-gen` writes for de/es/fr/it/ja/pt, and the shape
++//   `ensureCardLocale` (client/src/services/engineRuntime.ts) consumes.
++
++import { createWriteStream, existsSync } from "node:fs";
++import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
++import { createInterface } from "node:readline";
++import { Readable } from "node:stream";
++import { pipeline } from "node:stream/promises";
++import { dirname, join, resolve } from "node:path";
 +import { fileURLToPath } from "node:url";
 +
 +const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-+const wasmDir = resolve(repoRoot, "client/src/wasm");
-+const wasmPath = resolve(wasmDir, "engine_wasm_bg.wasm");
-+const dataPath = resolve(repoRoot, "client/public/card-data.json");
 +
-+for (const [label, path] of [
-+  ["engine WASM", wasmPath],
-+  ["card data", dataPath],
-+]) {
-+  if (!existsSync(path)) {
-+    console.error(`missing ${label}: ${path}`);
-+    console.error("build it first (./scripts/build-wasm.sh / ./scripts/gen-card-data.sh)");
-+    process.exit(2);
-+  }
-+}
-+
-+const wasm = await import(`${wasmDir}/engine_wasm.js`);
-+await wasm.default({
-+  module_or_path: await WebAssembly.compile(await readFile(wasmPath)),
-+});
-+
-+let count;
-+try {
-+  count = wasm.load_card_database(await readFile(dataPath, "utf8"));
-+} catch (error) {
-+  console.error("INCOMPATIBLE — the built engine cannot parse this card data.");
-+  console.error(String(error));
-+  console.error("\nRebuild the engine WASM: ./scripts/build-wasm.sh");
-+  process.exit(1);
-+}
-+
-+console.log(`COMPATIBLE — the built engine loaded ${count} cards from card-data.json.`);
-+console.log("No WASM rebuild needed for this card-data revision.");
-+
-+const cardFlag = process.argv.indexOf("--card");
-+if (cardFlag === -1) process.exit(0);
-+const cardName = process.argv[cardFlag + 1];
-+if (!cardName) {
-+  console.error("--card needs a card name");
-+  process.exit(2);
-+}
-+
-+const tree = wasm.get_card_parse_details(cardName);
-+if (tree === null || tree === undefined) {
-+  console.error(`\n"${cardName}" is not in the card database.`);
-+  process.exit(1);
-+}
-+
-+let unsupported = 0;
-+const walk = (items, depth) => {
-+  for (const item of items ?? []) {
-+    const ok = item.supported === true;
-+    if (!ok) unsupported += 1;
-+    console.log(`${"  ".repeat(depth)}[${ok ? "ok  " : "FAIL"}] ${item.category} :: ${JSON.stringify(item.label)}`);
-+    if (!ok) console.log(`${"  ".repeat(depth)}        source: ${JSON.stringify(item.source_text)}`);
-+    if (item.children?.length) walk(item.children, depth + 1);
-+  }
++const argv = process.argv.slice(2);
++const flag = (name) => argv.includes(`--${name}`);
++const option = (name, fallback) => {
++  const i = argv.indexOf(`--${name}`);
++  return i === -1 || i === argv.length - 1 ? fallback : argv[i + 1];
 +};
 +
-+console.log(`\n${cardName} — parse tree support flags:`);
-+walk(tree, 0);
-+console.log(
-+  unsupported === 0
-+    ? `\n${cardName}: every node supported.`
-+    : `\n${cardName}: ${unsupported} unsupported node(s).`,
-+);
-+process.exit(unsupported === 0 ? 0 : 1);
-diff --git a/scripts/gen-card-data.sh b/scripts/gen-card-data.sh
-index b5e1dfdb4..f7caba89d 100755
---- a/scripts/gen-card-data.sh
-+++ b/scripts/gen-card-data.sh
-@@ -453,9 +453,36 @@ fi
- # Filters MTGJSON's preconstructed decks to those whose every card the engine
- # can run right now. Always emits the debug `--emit-skipped` sidecar in dev
- # builds so parser coverage gaps surface as "decks blocked by card X".
-+#
-+# PHASE_DECKS_SCOPE narrows the emitted catalog to deck ids matching a suffix,
-+# for channel builds that ship one product instead of the whole precon history
-+# (e.g. `_WHO` for the four Doctor Who Commander decks). Unset — the default,
-+# and what upstream and CI run — emits every deck, unchanged.
- DECKS_OUTPUT_TMP="${DECKS_OUTPUT}.tmp"
- track_tmp "$DECKS_OUTPUT_TMP"
- if "$TOOL_BIN/oracle-gen" decks "$DATA_DIR" "$DECKS_OUTPUT_TMP" --emit-skipped; then
-+  if [ -n "${PHASE_DECKS_SCOPE:-}" ]; then
-+    # Filter in place, between generation and promotion, so the scope costs no
-+    # engine-side argument and the unfiltered output is never promoted. A scope
-+    # that selects nothing is treated as a failure below rather than promoted:
-+    # an empty catalog is indistinguishable at runtime from "no precons exist",
-+    # which is a much worse failure than a loud warning here.
-+    DECKS_SCOPED_TMP="${DECKS_OUTPUT_TMP}.scoped"
-+    track_tmp "$DECKS_SCOPED_TMP"
-+    if jq -e --arg scope "$PHASE_DECKS_SCOPE" \
-+        'type == "object" and (with_entries(select(.key | endswith($scope))) | length > 0)' \
-+        "$DECKS_OUTPUT_TMP" >/dev/null 2>&1; then
-+      jq --arg scope "$PHASE_DECKS_SCOPE" \
-+        'with_entries(select(.key | endswith($scope)))' "$DECKS_OUTPUT_TMP" > "$DECKS_SCOPED_TMP"
-+      mv "$DECKS_SCOPED_TMP" "$DECKS_OUTPUT_TMP"
-+      untrack_tmp "$DECKS_SCOPED_TMP"
-+      echo "Scoped decks to ids ending in '$PHASE_DECKS_SCOPE' ($(jq 'length' "$DECKS_OUTPUT_TMP") decks)"
-+    else
-+      rm -f "$DECKS_SCOPED_TMP"
-+      untrack_tmp "$DECKS_SCOPED_TMP"
-+      echo "WARNING: PHASE_DECKS_SCOPE='$PHASE_DECKS_SCOPE' matched no deck; leaving the unscoped catalog in place." >&2
-+    fi
-+  fi
-   if jq -e 'type == "object"' "$DECKS_OUTPUT_TMP" >/dev/null 2>&1; then
-     promote_tmp "$DECKS_OUTPUT_TMP" "$DECKS_OUTPUT"
-     echo "Promoted $DECKS_OUTPUT"
++const release = option("release", "data-2026-10-04");
++const dryRun = flag("dry-run");
++const allStages = flag("all-stages");
++const skipRulings = flag("skip-rulings");
++const sourceDir = resolve(repoRoot, option("source-dir", ".zhs-cache"));
++const outPath = resolve(repoRoot, "client/public/card-data.zhs.json");
++const releaseDir = join(sourceDir, release);
++const oraclePath = join(releaseDir, "zhs_oracle.json");
++const rulingPath = join(releaseDir, "zhs_ruling.json");
++
++const TARBALL = `magic-cards-zhs-${release}.tar.gz`;
++const URL = `https://github.com/HeliumOctahelide/magic-cards-zhs/releases/download/${release}/${TARBALL}`;
++
++// The dataset's quality tier. `text_stage` 5 is the MTGZH/MTGso bulk, 9 is the
++// official tier, and 0 is untranslated/unsourced (3,192 records). Dropping 0 is
++// the difference between "we ship translations" and "we ship whatever was in the
++// field that day", so it is the default; `--all-stages` opts back in.
++const MIN_STAGE = allStages ? 0 : 5;
++
++/** Rulings keep their OWN floor, and it defaults to "everything".
++ *
++ * The card-text floor exists because a low-tier Oracle record is an alternative to
++ * a good one — you either read the card in Chinese or you do not. Rulings are not
++ * like that: a card has several, so a floor drops SOME of a card's rulings and
++ * leaves the panel mixing Chinese and English sentences. Measured over the pool,
++ * stage 5+ covers 17,290 of the engine's 32,920 distinct rulings (52.5%) while
++ * including stage 0 covers 32,835 (99.7%) — and the stage-0 rows are machine
++ * translations that keep the project's terminology consistent ("触发式异能",
++ * "阻挡生物", "海岛"). Given the choice between a readable Chinese sentence and an
++ * English one in a Chinese card panel, the Chinese one wins by default.
++ *
++ * `--text-stage-floor` / `--strict-ruling-stage` restore the filtered behaviour. */
++const MIN_RULING_STAGE = flag("strict-ruling-stage") ? MIN_STAGE : 0;
++
++/** Un-escape the dataset's one systematic malformation.
++ *
++ * 2,351 of 39,959 lines escape a literal double quote TWICE (`\\"`), which is
++ * not a legal JSON escape, so `JSON.parse` rejects the whole line. Replacing the
++ * two-character sequence `\"` → `"` repairs every affected line (measured: 39,959
++ * / 39,959 parse afterwards) and is a no-op on every other line.
++ *
++ * Applied to the RAW line BEFORE parsing, because the damage is inside the JSON
++ * string syntax — repairing after parse is impossible.
++ */
++const repairLine = (line) => line.replaceAll('\\\\"', '\\"');
++
++/** Substitute the dataset's one unexpanded template token: `CARDNAME`.
++ *
++ * Some records are machine-derived from Forge card scripts and still carry
++ * Forge's `CARDNAME` placeholder instead of the card's name (measured: 73
++ * occurrences across 52 of the 358 pool records — 14.5%). Left as-is it renders
++ * literally in the card text.
++ *
++ * Replaced with the record's own localized name, because the token stands for
++ * the card's name AS PRINTED and the surrounding text is localized. Falling back
++ * to the English key keeps a nameless record readable rather than printing the
++ * token. No other template token exists in the dataset (measured: zero
++ * occurrences of any other all-caps placeholder). */
++const expandCardName = (text, localizedName, englishName) =>
++  typeof text === "string"
++    ? text.replaceAll("CARDNAME", localizedName || englishName)
++    : text ?? undefined;
++
++/** Normalize the dataset's newline encoding to real line breaks.
++ *
++ * Every multi-line record escapes its line breaks TWICE — the parsed value
++ * carries the three characters `\`, `\`, `n` (measured: 22,195 records with that
++ * shape, 0 with a real newline, 14,735 single-line records with neither). The
++ * engine's Oracle parser is line-oriented, so a card handed `\\n` instead of a
++ * break would be parsed as one long line.
++ *
++ * The match is therefore the TWO backslashes plus `n`, replaced by one newline.
++ * Matching only `\n` (one backslash) is the subtle wrong answer: it consumes the
++ * pair and leaves the second backslash behind, yielding `\` + newline.
++ *
++ * A single-line record is unaffected, and an Oracle text has no legitimate
++ * `\\n`, so this cannot damage a value that was already correct. */
++const unescapeNewlines = (text) =>
++  typeof text === "string" ? text.replaceAll("\\\\n", "\n") : text ?? undefined;
++
++/** Fold the punctuation differences between the two sources.
++ *
++ * The engine's English ruling text comes from MTGJSON and the dataset's from
++ * Scryfall, and they disagree on typography — curly vs straight quotes, em dash
++ * vs `--`, the ellipsis character vs three dots — plus incidental whitespace.
++ * Matching raw text finds 89% of rulings; folding those classes first finds 99%
++ * (measured over the full 79,668-ruling WHO pool: 71,694 exact, +7,486 folded).
++ *
++ * Applied to BOTH sides, and the sidecar is keyed by the folded form so the
++ * lookup at runtime is a single call rather than a scan. Folding cannot merge two
++ * distinct rulings: it only rewrites punctuation that carries no meaning here.
++ */
++function normalizeForMatch(text) {
++  return String(text ?? "")
++    .replaceAll("\u2019", "'")
++    .replaceAll("\u2018", "'")
++    .replaceAll("\u201c", '"')
++    .replaceAll("\u201d", '"')
++    .replaceAll("\u2014", "--")
++    .replaceAll("\u2013", "-")
++    .replaceAll("\u2026", "...")
++    .trim()
++    .split(/\s+/)
++    .join(" ");
++}
++
++/** Pick the best of the several records that share one `oracle_id`.
++ *
++ * The dataset is per-PRINTING (39,959 records over 38,932 oracle ids) while the
++ * sidecar is per-CARD-NAME, so a deterministic reduction is required. Order:
++ * higher `text_stage` wins, then the later `released_at` (a reprint's text is
++ * the more likely current Oracle wording), then `collector_number` so the result
++ * never depends on file order. */
++function betterRecord(a, b) {
++  const stage = (r) => r.text_stage ?? -1;
++  if (stage(a) !== stage(b)) return stage(a) > stage(b) ? a : b;
++  const rel = (r) => r.released_at ?? "";
++  if (rel(a) !== rel(b)) return rel(a) > rel(b) ? a : b;
++  return (a.collector_number ?? "") <= (b.collector_number ?? "") ? a : b;
++}
++
++async function ensureSource() {
++  if (existsSync(oraclePath)) {
++    console.log(`source: reusing ${oraclePath}`);
++    return;
++  }
++  if (dryRun) {
++    throw new Error(
++      `--dry-run needs an extracted ${oraclePath}; fetch it first with\n` +
++        `  node scripts/gen-zhs-card-text.mjs --release ${release}`,
++    );
++  }
++  console.log(`source: downloading ${TARBALL} (~74 MB) ...`);
++  await mkdir(releaseDir, { recursive: true });
++  const response = await fetch(URL);
++  if (!response.ok) {
++    throw new Error(`download failed: HTTP ${response.status} for ${URL}`);
++  }
++  const tarball = join(sourceDir, TARBALL);
++  await pipeline(Readable.fromWeb(response.body), createWriteStream(tarball));
++
++  // Extract only the one member we need — `scryfall_card.json` alone is 247 MB.
++  console.log("source: extracting zhs_oracle.json ...");
++  const { execFile } = await import("node:child_process");
++  const { promisify } = await import("node:util");
++  await promisify(execFile)("tar", ["xzf", tarball, "-C", releaseDir, "zhs_oracle.json"]);
++  await rm(tarball, { force: true });
++  console.log(`source: extracted to ${oraclePath}`);
++}
++
++/** Lowercased English name -> oracle id, for the faces the card pool contains. */
++async function loadPool() {
++  const raw = await readFile(resolve(repoRoot, "client/public/card-data.json"), "utf8");
++  const pool = JSON.parse(raw);
++  const byOracle = new Map();
++  let multiFace = 0;
++  for (const [name, face] of Object.entries(pool)) {
++    const oracleId = face.scryfall_oracle_id;
++    if (!oracleId) continue;
++    // Single-faced only, mirroring `oracle_gen::collect_localized`: MTGJSON and
++    // this dataset both expose multi-face cards as one combined "A // B" record,
++    // and writing that under a single face's key would put a wrong value where
++    // the English fallback belongs.
++    if (name.includes("//")) {
++      multiFace += 1;
++      continue;
++    }
++    byOracle.set(oracleId, name);
++  }
++  console.log(`pool: ${Object.keys(pool).length} faces, ${byOracle.size} usable keys (${multiFace} multi-face skipped)`);
++  return byOracle;
++}
++
++/** Every face the sidecar should carry an entry for: `name -> english ruling
++ *  texts`. Read from `card-data.json` because the engine's rulings live there and
++ *  only there — and because a card can have rulings without having a Chinese
++ *  Oracle record, which is the majority of them. */
++async function loadPoolRulings() {
++  const raw = await readFile(resolve(repoRoot, "client/public/card-data.json"), "utf8");
++  const pool = JSON.parse(raw);
++  const byName = new Map();
++  for (const [name, face] of Object.entries(pool)) {
++    if (name.includes("//")) continue;
++    const rulings = (face.rulings ?? [])
++      .map((ruling) => (ruling?.text ?? "").trim())
++      .filter(Boolean);
++    byName.set(name, rulings);
++  }
++  return byName;
++}
++
++/** English ruling text (normalized) -> Chinese, from the dataset's ruling export.
++ *
++ * Keyed by `normalizeForMatch(comment)` because that is exactly what the runtime
++ * lookup can compute: the engine exposes a ruling as `{date, text}` with no id, so
++ * the ONLY join available is the English sentence itself.
++ *
++ * Optional file: a card-text-only run logs and continues rather than failing, so
++ * the text half of this sidecar never depends on a second download.
++ */
++async function loadRulingTranslations() {
++  if (skipRulings) return null;
++  if (!existsSync(rulingPath)) {
++    console.log(`rulings: ${rulingPath} not present — writing text fields only`);
++    console.log("  fetch zhs_ruling.json from the same release to include rulings.");
++    return null;
++  }
++  const translations = new Map();
++  const stats = { lines: 0, malformed: 0, belowStage: 0, noTranslation: 0 };
++  const rl = createInterface({
++    input: (await import("node:fs")).createReadStream(rulingPath),
++    crlfDelay: Infinity,
++  });
++  for await (const rawLine of rl) {
++    const line = rawLine.trim();
++    if (!line) continue;
++    stats.lines += 1;
++    let record;
++    try {
++      record = JSON.parse(line);
++    } catch {
++      stats.malformed += 1;
++      try {
++        record = JSON.parse(repairLine(line));
++      } catch {
++        continue;
++      }
++    }
++    const comment = (record.comment ?? "").trim();
++    const translation = (record.translation ?? "").trim();
++    if (!comment || !translation) {
++      stats.noTranslation += 1;
++      continue;
++    }
++    if ((record.stage ?? -1) < MIN_RULING_STAGE) {
++      stats.belowStage += 1;
++      continue;
++    }
++    translations.set(normalizeForMatch(comment), translation);
++  }
++  console.log(
++    `rulings: ${translations.size} translations ` +
++      `(${stats.lines} records, ${stats.malformed} malformed, ` +
++      `${stats.belowStage} below stage ${MIN_RULING_STAGE}, ${stats.noTranslation} untranslated)`,
++  );
++  return translations;
++}
++
++async function main() {
++  await ensureSource();
++  const byOracle = await loadPool();
++
++  const best = new Map();
++  const stats = {
++    lines: 0,
++    malformed: 0,
++    noChinese: 0,
++    belowStage: 0,
++    notInPool: 0,
++  };
++
++  const rl = createInterface({
++    input: (await import("node:fs")).createReadStream(oraclePath),
++    crlfDelay: Infinity,
++  });
++  for await (const rawLine of rl) {
++    const line = rawLine.trim();
++    if (!line) continue;
++    stats.lines += 1;
++    let record;
++    try {
++      record = JSON.parse(line);
++    } catch {
++      stats.malformed += 1;
++      try {
++        record = JSON.parse(repairLine(line));
++      } catch {
++        continue; // unrepairable; counted and skipped rather than aborting
++      }
++    }
++    const oracleId = record.oracle_id ?? record.face_oracle_id;
++    const name = byOracle.get(oracleId);
++    if (!name) {
++      stats.notInPool += 1;
++      continue;
++    }
++    if (!record.translated_name && !record.translated_text) {
++      stats.noChinese += 1;
++      continue;
++    }
++    if ((record.text_stage ?? -1) < MIN_STAGE) {
++      stats.belowStage += 1;
++      continue;
++    }
++    const previous = best.get(oracleId);
++    best.set(oracleId, previous ? betterRecord(previous, record) : record);
++  }
++
++  const rulingTranslations = await loadRulingTranslations();
++
++  // Built over the WHOLE pool rather than over `best` alone: the two datasets
++  // cover different cards (text is per-Oracle-record, rulings are per-card), and
++  // most cards with rulings have no Chinese Oracle record at all. Iterating only
++  // the text winners would silently drop those rulings.
++  const poolRulings = await loadPoolRulings();
++  const localizedByOracle = new Map();
++  for (const [oracleId, record] of best) localizedByOracle.set(byOracle.get(oracleId), record);
++
++  const sidecar = {};
++  let cardsWithText = 0;
++  let cardsWithRulings = 0;
++  let rulingsTotal = 0;
++  for (const [englishName, rulings] of poolRulings) {
++    const record = localizedByOracle.get(englishName);
++    const localizedName = record?.translated_name ?? undefined;
++    const entry = {};
++    if (record) {
++      cardsWithText += 1;
++      entry.name = localizedName;
++      entry.oracle_text = expandCardName(
++        unescapeNewlines(record.translated_text),
++        localizedName,
++        englishName,
++      );
++      entry.type_line = record.translated_type ?? undefined;
++    }
++    if (rulingTranslations) {
++      // Keyed by the NORMALIZED ENGLISH TEXT, not a positional array. The engine
++      // returns its own ruling list and a translation can be missing for any one
++      // of them, so an array would slide out of correspondence the moment a
++      // ruling shifted or was untranslated — silently attaching the wrong Chinese
++      // sentence to a ruling. Keyed, a runtime lookup either finds the sentence
++      // that matches or falls back to English.
++      const translated = {};
++      for (const text of rulings) {
++        const zh = rulingTranslations.get(normalizeForMatch(text));
++        if (zh) {
++          translated[normalizeForMatch(text)] = zh;
++          rulingsTotal += 1;
++        }
++      }
++      if (Object.keys(translated).length) {
++        entry.rulings = translated;
++        cardsWithRulings += 1;
++      }
++    }
++    if (Object.keys(entry).length) sidecar[englishName] = entry;
++  }
++
++  const covered = Object.keys(sidecar).length;
++  const poolSize = byOracle.size;
++  console.log("");
++  console.log(`dataset: ${stats.lines} lines, ${stats.malformed} malformed (repaired)`);
++  console.log(`  skipped: ${stats.belowStage} below stage ${MIN_STAGE}, ` +
++    `${stats.noChinese} without Chinese, ${stats.notInPool} not in this card pool`);
++  if (rulingTranslations) {
++    console.log(`  rulings: ${rulingsTotal} translations across ${cardsWithRulings} cards`);
++    console.log(`  text:    ${cardsWithText} cards`);
++  }
++  console.log(`sidecar: ${covered} / ${poolSize} pool faces (${((covered / poolSize) * 100).toFixed(1)}%)`);
++
++  if (dryRun) {
++    console.log("--dry-run: nothing written");
++    return;
++  }
++  await writeFile(outPath, JSON.stringify(sidecar));
++  const { size } = await import("node:fs").then((fs) => fs.promises.stat(outPath));
++  console.log(`wrote ${outPath} (${(size / 1024 / 1024).toFixed(2)} MB)`);
++  console.log(
++    "attribution: card text from 大学院废墟 (HeliumOctahelide/magic-cards-zhs), CC-BY-SA-4.0",
++  );
++}
++
++await main();

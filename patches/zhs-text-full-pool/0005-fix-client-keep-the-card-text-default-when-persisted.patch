@@ -1,0 +1,98 @@
+From d8c447ff0dec431f91284ed02db57f29a1d949e5 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 13:55:11 +0800
+Subject: [PATCH 5/5] fix(client): keep the card-text default when persisted
+ preferences predate it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The preference was silently inert on every existing install. `merge` normalized
+the persisted field with `normalizeCardTextLanguage(saved.cardTextLanguage)`, and
+a blob written before this preference existed has no such field — so `undefined`
+normalized to `"auto"`, which resolves to the INTERFACE language. The interface
+has no Chinese catalog, so `"auto"` can never reach the Chinese sidecar: the
+fork's own default was defeated by any browser that had saved preferences before
+it shipped. Migrate had the same shape.
+
+Absence in persisted state means "this blob predates the preference", not
+"invalid", so `restoreCardTextLanguage(value, current)` now distinguishes them and
+defers to `current` for `undefined`. Verified across the five shapes that matter:
+absent → the fork default (`zhs`), absent-with-other-fields → still `zhs`, an
+explicit `"zhs"`/`"ja"` → respected, and a garbage value → `"auto"` as before.
+---
+ client/src/services/cardTextLocale.ts | 19 +++++++++++++++++++
+ client/src/stores/preferencesStore.ts | 14 +++++++++++---
+ 2 files changed, 30 insertions(+), 3 deletions(-)
+
+diff --git a/client/src/services/cardTextLocale.ts b/client/src/services/cardTextLocale.ts
+index c7df048912..945e8e0728 100644
+--- a/client/src/services/cardTextLocale.ts
++++ b/client/src/services/cardTextLocale.ts
+@@ -54,6 +54,25 @@ export function normalizeCardTextLanguage(value: unknown): CardTextLanguagePrefe
+   return isCardTextLanguage(value) ? value : "auto";
+ }
+ 
++/**
++ * `normalizeCardTextLanguage` for a value read out of PERSISTED state, where
++ * `undefined` means "this blob predates the preference" rather than "invalid".
++ *
++ * The distinction is load-bearing here because `"auto"` resolves to the INTERFACE
++ * language, and the interface has no Chinese catalog (`SUPPORTED_LNGS` contains no
++ * `zhs`). So an absent field normalized to `"auto"` can never reach the Chinese
++ * sidecar: every install that saved preferences before this preference existed
++ * would silently lose card-text localization — which is this fork's whole point.
++ * Falling back to `current` keeps the fork's default for an upgrade and an
++ * explicit choice for anyone who already made one.
++ */
++export function restoreCardTextLanguage(
++  value: unknown,
++  current: CardTextLanguagePreference,
++): CardTextLanguagePreference {
++  return value === undefined ? current : normalizeCardTextLanguage(value);
++}
++
+ /**
+  * The card-text locale to resolve in, given the interface language and the
+  * preference (`"auto"` = follow the interface).
+diff --git a/client/src/stores/preferencesStore.ts b/client/src/stores/preferencesStore.ts
+index 1a56184744..8fb1865473 100644
+--- a/client/src/stores/preferencesStore.ts
++++ b/client/src/stores/preferencesStore.ts
+@@ -27,7 +27,7 @@ import type { DeckArchetype } from "../services/engineRuntime";
+ import { detectInitialLanguage, normalizeSupportedLng, type SupportedLng } from "../i18n/resources";
+ import { isArtLanguage, type ArtLanguage } from "../services/cardArtLocale.ts";
+ import {
+-  normalizeCardTextLanguage,
++  restoreCardTextLanguage,
+   type CardTextLanguagePreference,
+ } from "../services/cardTextLocale.ts";
+ 
+@@ -1194,8 +1194,13 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+           ...migrated,
+           language: normalizeSupportedLng(migrated.language, detectInitialLanguage()),
+           artLanguage: normalizeArtLanguage(migrated.artLanguage),
+-          cardTextLanguage: normalizeCardTextLanguage(
++          // NOT `normalizeCardTextLanguage`: a blob written before this
++          // preference existed has no field here, and normalizing the absence to
++          // "auto" would resolve to the (never-Chinese) interface language and
++          // silently disable card-text localization. See `restoreCardTextLanguage`.
++          cardTextLanguage: restoreCardTextLanguage(
+             migrated.cardTextLanguage,
++            buildDefaultPreferences().cardTextLanguage,
+           ),
+         };
+       },
+@@ -1211,8 +1216,11 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+           ...saved,
+           language: normalizeSupportedLng(saved.language, current.language),
+           artLanguage: normalizeArtLanguage(saved.artLanguage),
+-          cardTextLanguage: normalizeCardTextLanguage(
++          // `current` already carries either the fork default or the value this
++          // session loaded, so an absent persisted field must defer to it.
++          cardTextLanguage: restoreCardTextLanguage(
+             saved.cardTextLanguage,
++            current.cardTextLanguage,
+           ),
+           logDockSide: saved.logDockSide === "left" || saved.logDockSide === "right"
+             ? saved.logDockSide

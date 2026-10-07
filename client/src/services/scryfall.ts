@@ -381,6 +381,10 @@ export function isLocaleArtReady(lang: string): boolean {
  */
 export function loadLocaleArt(lang: string): Promise<Map<string, LocalizedArtEntry>> {
   desiredArtLang = lang;
+  // A locale's availability set is disjoint from another's, so a remembered
+  // canonical printing would pin every card to a printing the new locale may not
+  // have. Clear before anything can re-resolve.
+  clearCanonicalPrintings();
   if (lang === "en") {
     localeArtResolved = null;
     return Promise.resolve(new Map<string, LocalizedArtEntry>());
@@ -1328,6 +1332,69 @@ function firstAvailablePrinting(
   return null;
 }
 
+/**
+ * The ONE printing this locale renders a given card as, for every zone, for the
+ * whole session.
+ *
+ * Without this, each entry point picked for itself — and they disagree, because
+ * they resolve at different moments against state that is loaded lazily
+ * (`artAvailability` and the printings map are both fetched, and
+ * `firstAvailablePrinting` returns null until the first arrives). The player sees
+ * one card as two: the hand rendered Doctor Who's `2x2 #454` while the stack
+ * rendered `2x2 #123`, same spell, same frame.
+ *
+ * Cached by `oracleId` and cleared whenever the art locale changes (a locale's
+ * availability set is disjoint from another's, so a remembered printing would pin
+ * every card to whatever the previous locale happened to have). Cards are
+ * canonicalized, not "preferred only when the stored printing is missing", so
+ * there is exactly one answer per card rather than one per entry point.
+ *
+ * A null result means "no printing in this locale" and is cached too: that is a
+ * property of the locale, not of who asked.
+ */
+const canonicalPrintingByOracle = new Map<string, string | null>();
+
+/** Drop every remembered choice. Called when the active art locale changes. */
+function clearCanonicalPrintings(): void {
+  canonicalPrintingByOracle.clear();
+}
+
+async function canonicalPrintingIdFor(oracleId: string): Promise<string | null> {
+  const key = oracleId.toLowerCase();
+  if (canonicalPrintingByOracle.has(key)) return canonicalPrintingByOracle.get(key) ?? null;
+  await loadArtAvailability();
+  await loadPrintingsData();
+  // `art_crop` only selects; the caller re-resolves at its own size, so the size
+  // passed here never reaches the returned id.
+  const preferred = firstAvailablePrinting(key, 0, "art_crop");
+  const chosen = preferred?.id.toLowerCase() ?? null;
+  canonicalPrintingByOracle.set(key, chosen);
+  return chosen;
+}
+
+/** Re-address an already-resolved asset onto the canonical printing, if both the
+ *  canonical choice and a usable URL for this face and size exist. */
+function applyCanonicalPrinting(
+  asset: CardImageAsset,
+  faceIndex: number,
+  size: ImageSize,
+  canonicalId: string | null,
+): CardImageAsset {
+  if (!canonicalId) return asset;
+  const printings = printingsDataResolved?.[asset.semantic.oracleId ?? ""] ?? [];
+  const printing = printings.find((candidate) => candidate.id.toLowerCase() === canonicalId);
+  if (!printing) return asset;
+  const url = resolvePrintingImageUrl(printing, faceIndex, size);
+  if (!url || isPlaceholderImageUrl(url)) return asset;
+  return {
+    ...asset,
+    src: url,
+    ...remoteImageSource(url, size),
+    semantic: { ...asset.semantic, englishPrintingId: canonicalId },
+  };
+}
+
+
 function resolvePrintingFallback(
   oracleId: string,
   faceIndex: number,
@@ -1349,33 +1416,20 @@ async function resolveImageAssetWithPrintingFallback(
   diagnosticName: string,
 ): Promise<CardImageAsset> {
   const asset = resolveImageAsset(entry, faceIndex, size, diagnosticName);
-  const storedId = asset.semantic.englishPrintingId
-    ?? printingIdOf(asset.src)
-    ?? "";
 
   // A derived locale has art for only SOME printings of a card — the CDN
   // localizes community art per printing, and within one set the split is
-  // arbitrary. The stored asset names one printing; when that printing has no
-  // art in this locale, prefer any printing that does, so the player sees the
-  // Chinese card the data actually provides instead of the English fallback.
+  // arbitrary. Every card this locale CAN render is therefore re-addressed onto
+  // the one printing the locale actually has, decided once per card and shared
+  // by every zone. See `canonicalPrintingIdFor` for why "once per card" rather
+  // than "per caller" is the whole point.
   //
   // Needs the printings map, which the ordinary path deliberately avoids
-  // loading. It is only reached for derived locales, and only when the stored
-  // printing turns out to be unavailable.
+  // loading. It is only reached for derived locales.
   if (isDerivedArtLocale(desiredArtLang)) {
-    await loadArtAvailability();
-    if (artAvailability && !artAvailability.has(storedId)) {
-      await loadPrintingsData();
-      const preferred = firstAvailablePrinting(entry.oracle_id, faceIndex, size);
-      if (preferred) {
-        return {
-          ...asset,
-          src: preferred.url,
-          ...remoteImageSource(preferred.url, size),
-          semantic: { ...asset.semantic, englishPrintingId: preferred.id.toLowerCase() },
-        };
-      }
-    }
+    const canonicalId = await canonicalPrintingIdFor(entry.oracle_id);
+    const canonical = applyCanonicalPrinting(asset, faceIndex, size, canonicalId);
+    if (canonical !== asset) return canonical;
   }
 
   if (!isPlaceholderImageUrl(asset.src)) return asset;

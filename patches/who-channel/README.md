@@ -16,7 +16,53 @@ patches/who-channel/
 
 ## 已完成
 
-### 1. 卡池只留 WHO
+### 1. 卡池：**已改为全量**（2026-10 决定，含实测数字）
+
+> ⚠️ **这一条是本补丁最初的目的，现在已经反过来了，别按旧版做。**
+> 最初收窄到 362 张；后来改用**全量卡池**（见下方"全量卡池"一节的取舍与实测）。
+> 预组仍然只留四套 WHO（第 2 节未变）。
+
+#### 全量卡池（当前状态）
+
+```bash
+# 恢复全量（备份只做一次）
+cp /tmp/AtomicCards.full.json data/mtgjson/AtomicCards.json
+MTGJSON_SKIP_REFRESH=1 ./scripts/gen-card-data.sh      # 不加 PHASE_DECKS_SCOPE
+```
+
+**实测（这台机器）**：
+
+| 项目 | 收窄时 | 全量 |
+| --- | --- | --- |
+| `AtomicCards.json` 输入 | 2.1 MB / 366 张 | **154 MB / 35,082 张** |
+| `card-data.json` | 1.5 MB | **95.0 MB** |
+| `coverage-data.json` | 1.0 MB | **62.9 MB** |
+| `card-names.json` | 8 KB | **672 KB** |
+| 卡池解析结果 | 362 张 | **35,879 张** |
+| 完全支持 | 341 (94.2%) | **32,010 (89.2%)** |
+| 中文 sidecar | 358 条 / 0.11 MB | **34,522 条 / 8.60 MB** |
+
+**启动性能实测**（真实 WASM + 真实 95 MB 卡数据）：
+
+```
+WASM 初始化      284 ms
+读取 95MB 文件    31 ms
+解析 35,879 张   997 ms
+查询单张牌         6 ms
+总计            1.4 s
+```
+
+**结论：95 MB 不是问题** —— V8 的 `JSON.parse` 很快，且引擎载入是一次性的。
+（这也是为什么没有为"按需查询"重构 sidecar 加载。）
+
+**顺带解决的**：收窄卡池会让 `coverage.rs::collect_valid_subtypes` 的词典
+（从**卡池**构建）只有 69 个副类别，导致 `Elemental`/`Cat`/`Plant`/`Coward`
+被判"非法副类别"→ 6 张牌**假警报**。全量卡池下词典完整，这 6 张自动消失。
+（`New New York` 的 `Vehicles` 复数问题是**另一个** bug，全量也修不好。）
+
+#### 收窄卡池（原始做法，保留备查）
+
+
 
 产出从全量 **71237 张** 收窄到 **362 张**，卡数据文件从 **37 MB** 降到 **1.5 MB**。
 
@@ -73,7 +119,61 @@ PHASE_DECKS_SCOPE=_WHO ./scripts/gen-card-data.sh
 （#318 有中文，#528 / #909 / #1119 都没有），所以只能逐印刷探测。
 细节见 `patches/zhs-card-art/README.md`。
 
-### 🔬 第 4 步（The Eighth Doctor）—— 解析器已完成，运行时未接线
+### 4. 中文卡牌文本（大学院废墟数据，默认开启）
+
+**为什么不能用现有管线**：其它语言的 `card-data.<lng>.json` 都来自 MTGJSON 的
+`foreignData`，而 **Scryfall 完全没有简中印刷** → `zhs` 永远为空。所以这一种语言
+换成社区数据集 [大学院废墟 / magic-cards-zhs](https://github.com/HeliumOctahelide/magic-cards-zhs)
+（每周 GitHub release，CC-BY-SA-4.0）。
+
+```bash
+node scripts/gen-zhs-card-text.mjs            # 产出 client/public/card-data.zhs.json
+node scripts/gen-zhs-card-text.mjs --dry-run  # 只报告不写文件
+```
+
+**设计决定：独立脚本，不是 `oracle-gen` 的一个分支。** 因为 `card-data.json`
+已经带 `scryfall_oracle_id`，join 不需要引擎代码 —— 跑一次**几秒**，
+而不是排在 `tool` profile 那次 15 分钟重编后面。
+
+**数据源有三个坑，都已实测并处理**（数字是实测的）：
+
+| # | 问题 | 规模 | 处理 |
+| --- | --- | --- | --- |
+| 1 | **JSON 转义多了一层**（`\\"` 非法）→ 整行解析失败 | **2,351 行** | 修原始行（`\"` → `"`）→ **39,959 / 39,959 全部通过** |
+| 2 | **换行是双反斜杠 + n**（`\\n`）→ 引擎按行解析会当成一整行 | **22,195 条**（真换行 0 条） | 归一化成真换行 |
+| 3 | **Forge 的 `CARDNAME` 模板变量未展开** | **73 处 / 52 张** | 替换为该牌自己的中文名 → 残留 0 |
+
+> **坑 2 有个值得记的细节**：第一版写 `replaceAll("\\n", "\n")`，结果把 `\\n`
+> 变成 **`\` + 真换行**（只吃掉一个反斜杠）。渲染出来看**看不出来**，
+> 是靠打印**字节**（`5c0a` vs `0a`）才发现的。
+
+**质量策略**：默认丢弃 `text_stage 0`（3,192 条无来源/未授权）。同一 `oracle_id`
+有多条记录时（数据是**按印刷**的，sidecar 是**按牌名**的）按
+`stage → 发布日期 → 收集编号` 确定性归约，**绝不依赖文件顺序**。
+
+**实测覆盖**：全量卡池 **34,522 / 35,879（96.2%）** 有中文。
+
+#### 前端：卡牌文本语言是**独立偏好**（默认 `zhs`）
+
+原来卡牌文本读的是**界面语言**，而界面语言闭集里**没有中文** → 中文 sidecar
+**永远取不到**。所以加了第三条独立轴（照 `artLanguage` 的形状）：
+
+| 偏好 | 管什么 | 默认 |
+| --- | --- | --- |
+| `language` | 界面文案 | 自动检测 |
+| `artLanguage` | 卡图 | `"auto"` |
+| **`cardTextLanguage`** | **卡名 / 规则文本 / 类别行** | **`"zhs"`** |
+
+**默认值选 `"zhs"` 而不是 `"auto"` 有具体原因**：`"auto"` 会解析成界面语言，
+而界面语言永远不是中文 → 默认值会让 sidecar 永远不加载。`"auto"` 仍保留。
+
+设置界面在「卡图语言」旁边加了控件，8 种语言的文案都是**真翻译**
+（不是复制英文兜底 —— 那两个控件在英文里读起来几乎一样，复制会把文本设置
+错标成卡图设置）。
+
+**许可**：文本是 **CC-BY-SA-4.0**（不同于 MTGJSON 的 MIT），已记入 `NOTICE`。
+
+### 🔬 The Eighth Doctor —— 解析器已完成，运行时未接线（**未完成**）
 
 **牌面**：
 > Once during each of your turns, you may play a historic land or cast a historic permanent spell
@@ -119,7 +219,7 @@ PHASE_DECKS_SCOPE=_WHO ./scripts/gen-card-data.sh
 **验收标准（实现前先写）**：运行时测试需断言放逐的永久物**离开战场时进入放逐区**，
 且在**没有**该 rider 的同类许可下**不会**如此——单向断言会漏掉「静默丢弃」。
 
-### ✅ 第 3 步（The Eleventh Doctor）—— 已修（用 Forge 的思路）
+### ✅ The Eleventh Doctor —— 已修（用 Forge 的思路）
 
 **缺口**：`keyword_anaphor_resolution_time_pick`（影响 3 张：The Eleventh Doctor、Amy's Home、
 Amy's Home 的 chaos 触发；代码里原本**刻意**严格失败并写明原因）。
@@ -202,7 +302,7 @@ TargetFilter::TrackedSetFiltered {
 （改用了 tracked set 台账），但任何**仍然**读 `last_zone_changed_ids` 的交互式
 「…this way」措辞依旧是坏的。那是独立的一块，未在本次范围内。
 
-### 4. 已修的牌（卡牌支持）
+### 5. 已修的牌（卡牌支持）
 
 预组里原本有 6 张不支持的牌，按「一次一张、修完验证」推进：
 
@@ -223,7 +323,7 @@ TargetFilter::TrackedSetFiltered {
 剩余 2 张：The Eighth Doctor、The Wedding of River Song。
 第 1 步（The Eighth Doctor）代码已完成、运行时测试待补；第 2 步（The Eleventh Doctor）**已完成**。
 
-### ✅ 第 4 步（Clara Oswald）—— 已修（CR 607.2p 开局选色）
+### ✅ Clara Oswald —— 已修（CR 607.2p 开局选色）
 
 **缺口**：那句「If Clara Oswald is your commander, choose a color before the
 game begins. Clara Oswald is the chosen color.」整段 strict-fail。
@@ -396,22 +496,41 @@ pnpm --dir client install
 # 2. 引擎 WASM（首次约 15–20 分钟，之后增量）
 ./scripts/build-wasm.sh
 
-# 3. 数据：先收窄卡池，再带范围生成
+# 3. 数据：全量卡池 + 预组只留四套 WHO
+#    先备份一次全量（收窄卡池是旧做法，见第 1 节）
 cp data/mtgjson/AtomicCards.json /tmp/AtomicCards.full.json   # 仅首次
-jq '{meta, data: (.data | with_entries(select(.value[0].printings | index("WHO"))))}' \
-  /tmp/AtomicCards.full.json > data/mtgjson/AtomicCards.json
-PHASE_DECKS_SCOPE=_WHO ./scripts/gen-card-data.sh
-git checkout -- crates/engine/data/oracle-subtypes.json       # 见上
+MTGJSON_SKIP_REFRESH=1 PHASE_DECKS_SCOPE=_WHO ./scripts/gen-card-data.sh
 
-# 3b. 衍生物卡图数据（约 1 分钟）—— 缺了它衍生物没有图
+# 3b. 中文卡牌文本（几秒）—— 必须在 3 之后跑：它按 card-data.json 的 oracle_id 做 join
+node scripts/gen-zhs-card-text.mjs
+
+# 3c. 衍生物卡图数据（约 1 分钟）—— 缺了它衍生物没有图
 ./scripts/gen-scryfall-token-images.sh
 
-# 3c. 中文卡图可用性表（约 15 秒）
+# 3d. 中文卡图可用性表
+#     带 _WHO 范围 = 约 15 秒，但只有 WHO 的 1178 个印刷有中文图 → 其余牌退回英文图
+#     不带范围     = 约 70,000 个印刷要逐个探测 CDN（**小时级**，见下方「已知限制」）
 ./scripts/gen-derived-art-availability.sh zhs _WHO
 
 # 4. 跑起来
 pnpm --dir client dev        # http://localhost:5173/
 ```
+
+## ⚠️ 已知限制：全量卡池下的中文卡图只覆盖 WHO
+
+`patches/zhs-card-art/` 的中文图是**逐印刷**从 CDN 探测出来的，没有可推导的规律
+（同一张牌的 #318 有中文图而 #528/#909/#1119 没有）。所以：
+
+| 范围 | 要探测的印刷 | 耗时 | 覆盖 |
+| --- | --- | --- | --- |
+| `_WHO`（当前做法） | 1,178 | 约 15 秒 | WHO 的 362 张有中文图 |
+| 不带范围 | **约 70,000** | **小时级**（且可能被 CDN 限流） | 全量卡池的中文图 |
+
+**当前状态：表是 `_WHO` 范围的**，所以全量卡池里非 WHO 的牌**显示英文图**，
+但**卡牌文本仍然是中文**（那来自 `gen-zhs-card-text.mjs`，与图无关 —— 两者是
+独立的两条链路，见第 4 节）。
+
+这是有意接受的取舍，不是遗漏：把 70,000 个印刷探测完是另一个独立工程。
 
 ## 已知情况
 

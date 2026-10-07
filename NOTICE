@@ -7,3 +7,16 @@ MTGJSON (https://mtgjson.com/)
 Licensed under the MIT License
 Card metadata including names, mana costs, types, oracle text, and other
 game-relevant fields is sourced from MTGJSON's open data sets.
+
+大学院废墟 — magic-cards-zhs (https://github.com/HeliumOctahelide/magic-cards-zhs)
+Licensed under CC-BY-SA-4.0
+Simplified-Chinese card names, Oracle text, and type lines are derived from that
+project's weekly data exports by `scripts/gen-zhs-card-text.mjs`, producing the
+build artifact `client/public/card-data.zhs.json`. Scryfall publishes no
+Simplified-Chinese printings, so this locale cannot come from MTGJSON's
+`foreignData` the way every other content language does.
+
+The derived sidecar is a build output and is not committed; the script that
+produces it, the source revision it reads, and this attribution travel with the
+repository instead.
+

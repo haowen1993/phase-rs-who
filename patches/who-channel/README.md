@@ -211,6 +211,7 @@ TargetFilter::TrackedSetFiltered {
 | 1 | Carpet of Flowers | `you haven't added mana with this ability this turn` | 复用 `AbilityCondition::AbilityUseCountThisTurn`（`Resolved` + `LT 1`），只加第三条模板 | ✅ 26→25 |
 | 2 | Exterminate! | `Replicate—Tap an untapped Dalek you control` 未识别 | `Replicate(ManaCost)` → `(AbilityCost)`；加 `replicate—` 破折号分支 | ✅ 25→24→23 |
 | 3 | The Eleventh Doctor | `keyword_anaphor_resolution_time_pick`（解析器 + 引擎台账 + 计数器三处） | 见上一节：重锚到 `TrackedSetFiltered{无 suspend, Exiled}` | ✅ |
+| 4 | Clara Oswald | CR 607.2p 开局选色（解析器 + 区域门 + 开局扫描 + 持久存储四处） | 见上一节 | ✅ |
 
 **Exterminate! 一次性暴露了 4 个叠加缺陷**（详见 commit message），其中第三个最危险：
 
@@ -219,8 +220,82 @@ TargetFilter::TrackedSetFiltered {
 > 通用 `EffectCost`（`SetTapState`）——而 `supports_effect_cost_payment` **拒绝**它。
 > **牌解析显示成功，但实际无法施放。** 已在 `parse_oracle_cost` 通用层修掉。
 
-剩余 3 张：The Eighth Doctor、Clara Oswald、The Wedding of River Song。
+剩余 2 张：The Eighth Doctor、The Wedding of River Song。
 第 1 步（The Eighth Doctor）代码已完成、运行时测试待补；第 2 步（The Eleventh Doctor）**已完成**。
+
+### ✅ 第 4 步（Clara Oswald）—— 已修（CR 607.2p 开局选色）
+
+**缺口**：那句「If Clara Oswald is your commander, choose a color before the
+game begins. Clara Oswald is the chosen color.」整段 strict-fail。
+
+**它不是一张牌，是一个恰好 3 张的类。** 实测（Scryfall
+`oracle:"choose a color before the game begins"`，`unique=cards`）全卡池只有：
+
+| 牌 | 措辞 |
+| --- | --- |
+| Clara Oswald | `Impossible Girl — ` 异能词 + 配对 |
+| Faceless One | 裸配对 |
+| The Prismatic Piper | 裸配对 |
+
+三张**除牌名外措辞完全相同**，所以识别器按**类**建，不是按卡建。
+
+#### CR 607.2p：一段文字 = 一对**关联异能**
+
+```
+① 静态能力：让牌手在游戏开始前选一个颜色        → AbilityKind::BeginGame
+② 特征定义能力：读那个选择                      → CDA + AddChosenColor{Set}
+```
+
+第二段「continues to refer to that choice as the object **changes zones**
+during the game」是这条规则的重点。
+
+#### 顺带修掉的三个**通用**缺陷（都不只影响这张牌）
+
+| # | 位置 | 缺陷 |
+| --- | --- | --- |
+| 1 | `layers.rs::effect_candidate_ids` | **CDA 在所有区域生效（CR 604.3），但具名对象的受影响集合按 *filter 的*扫描区域解析，默认只有战场** → 指挥区里的 `SelfRef` CDA **受影响集合为空、被整个丢弃**（不是判假，是没执行）。收窄到 `named == source_id`，因为 `SpecificObject` 指向**别的**对象那一类由 off-zone 机制负责（有测试钉住） |
+| 2 | `mulligan.rs::queue_begin_game_abilities` | 只扫**起手牌**。CR 903.6 说指挥官开局在**指挥区** → 指挥官自己的开局能力永远找不到。改成手牌 + 指挥区 |
+| 3 | `StaticCondition` | 没有"源是（我的）指挥官"这个条件。新增 `SourceIsCommander`（CR 903.3：指挥官身份是**牌的属性**，任何区域都成立）+ 同步 20 处穷尽 match |
+
+#### 还有个**存储**问题（不是缺陷，是规则要求）
+
+CR 607.2p 要求那个选择**跨区域持续**，但 `chosen_attributes` 每次进战场都被
+`reset_for_battlefield_entry` 清掉（CR 400.7）—— 指挥官在指挥区选完色，一进战场就丢。
+
+所以加了 `GameObject::commander_color_choice`（像 `is_commander` 一样是牌的属性，永不清除），
+`GameObject::chosen_color` **优先读它**。这样整个"所选颜色"家族
+（`AddChosenColor` / `IsChosenColor` / `HexproofFrom`/`Protection(ChosenColor)`）
+一行都不用改就服务于这张牌。
+
+#### ⚠️ 已知缺口（明确决定不做，不是没发现）
+
+**CR 903.4b**：选的颜色「applies **during deck construction** ... That choice
+**affects the commander's color identity**」。
+
+组牌校验**不知道**这个选择，所以**以克拉拉为指挥官**的自定义套牌，
+不会按她的颜色做标识色校验（CR 903.5c / 903.5d）。
+
+**影响面 = 一个本 fork 绝不会走到的场景**：实测 Paradox Power 预组的指挥官是
+**The Thirteenth Doctor + Yasmin Khan**，克拉拉在 **99 张主牌**里 ——
+按 CR 903.3d，她不是指挥官 → `StaticCondition::SourceIsCommander` 为**假** →
+整段文字**不生效**，引擎行为**完全正确**。
+
+补上它需要组牌侧的选择（`DeckCompatibilityRequest` / `PlayerDeckList` 各加字段 +
+组牌界面选择器 + 改选后重校验），是一块独立的工作，另开一轮。
+
+**为什么明确记录而不静默放过**：这一轮我们已经因为"能跑但静默错"栽过三次
+（第八任博士的台账、第十一任博士的指示物、克拉拉自己的 CDA 区域门），
+每次都是先把它变响才修好的。
+
+#### 另一个**独立的**既有缺口（顺带查到，未修）
+
+`deck_validation::card_color_identity` 的**回退分支只读法术力费用和
+`color_override`，从不读规则文本里的法术力符号（CR 903.4），也从不读 CDA**。
+
+本 fork 里被掩盖了：数据管线为 362 张里的 **281 张**预填了来自 Scryfall 的
+`color_identity` 字段，回退只在剩下 **81 张**时运行。实测 WHO 卡池有 **74 张**
+「费用无色 + 文本含彩色符号」（Talisman 系列、Temple 系列、基本地等）**全部靠预填字段绕过回退** ——
+所以这是**数据依赖的运气，不是实现正确**。
 
 ## ⚡ 先跑这个再决定要不要重建 WASM（省 20 分钟）
 

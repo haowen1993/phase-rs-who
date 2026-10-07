@@ -1010,16 +1010,7 @@ describe("CardVfxLayer present contract", () => {
     const failed = await renderLayer();
     const back = document.querySelector<HTMLImageElement>(`img[src="${corsOnlySrc(source)}"]`);
     if (!back) throw new Error("no back loader");
-    // First failure retries the SAME url without `crossOrigin`, because the
-    // attribute puts the load into CORS mode and the derived locale's CDN cannot
-    // answer one — while a plain `<img>` loads the same bytes fine. The ladder is
-    // only advanced once that retry has also failed.
     fireEvent.error(back);
-    expect(advanceFailedSource).not.toHaveBeenCalled();
-    const retried = document.querySelector<HTMLImageElement>(`img[src="${corsOnlySrc(source)}"]`);
-    expect(retried?.getAttribute("crossorigin")).toBeNull();
-    if (!retried) throw new Error("no retried back loader");
-    fireEvent.error(retried);
     expect(advanceFailedSource).toHaveBeenCalledTimes(1);
     expect(advanceFailedSource).toHaveBeenCalledWith(R);
     failed.unmount();

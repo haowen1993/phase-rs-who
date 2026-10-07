@@ -1,0 +1,236 @@
+From eea72169db69694370eca244ae10b4c13a838336 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 11:32:39 +0800
+Subject: [PATCH 2/4] feat(client): give card TEXT its own language preference,
+ defaulting to Chinese
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Card text was keyed off the interface language, which made a Chinese sidecar
+unreachable by construction: `SUPPORTED_LNGS` has no `zhs` (no chrome catalog
+exists), so `ensureCardLocale` was only ever asked for `en/es/fr/de/it/pt/pl/ja`.
+
+Adds the third independent axis, mirroring `artLanguage` and its rationale:
+
+  - `language`      — interface chrome
+  - `artLanguage`   — card art
+  - `cardTextLanguage` — card name / Oracle text / type line   (this commit)
+
+The three sets are not nested in any direction: Polish has a UI catalog and no
+localized card text (MTGJSON carries zero Polish foreignData); Chinese has text
+and art and no UI catalog. Coupling any two forces either a full chrome
+translation or no Chinese cards.
+
+Default is `"zhs"` rather than `"auto"` — and the reason is specific rather than
+a taste call: `"auto"` resolves to the interface language, which is never
+Chinese, so the default would leave the sidecar permanently unloaded. `"auto"`
+remains a legal value for any player who wants card text to track the UI.
+
+`resolveCardTextLanguage` is total and never-throwing (an unrecognized persisted
+value falls back to the interface language), and the loaders already tolerate a
+missing sidecar — `ensureCardLocale` resolves a 404 to an empty map and both
+call sites fall back to English per field, so an unpublished locale degrades
+rather than breaking a card.
+---
+ client/src/hooks/useEngineCardData.ts | 17 ++++++-
+ client/src/services/cardTextLocale.ts | 72 +++++++++++++++++++++++++++
+ client/src/stores/preferencesStore.ts | 22 ++++++++
+ 3 files changed, 109 insertions(+), 2 deletions(-)
+ create mode 100644 client/src/services/cardTextLocale.ts
+
+diff --git a/client/src/hooks/useEngineCardData.ts b/client/src/hooks/useEngineCardData.ts
+index b8a00dcd92..fedb4419e4 100644
+--- a/client/src/hooks/useEngineCardData.ts
++++ b/client/src/hooks/useEngineCardData.ts
+@@ -6,6 +6,7 @@ import {
+ } from "../services/engineRuntime";
+ import { getSharedAdapter } from "../adapter/wasm-adapter";
+ import { usePreferencesStore } from "../stores/preferencesStore";
++import { resolveCardTextLanguage } from "../services/cardTextLocale";
+ 
+ /**
+  * Engine-parsed card face data returned from WASM.
+@@ -50,7 +51,13 @@ export interface ParsedItem {
+  * wrapper ensures that as a prerequisite, then performs the query.
+  */
+ export function useEngineCardData(cardName: string | null): EngineCardFace | null {
+-  const language = usePreferencesStore((s) => s.language);
++  // Card TEXT follows its own preference, not the interface language: the
++  // interface has no Chinese catalog, so keying card text off `language`
++  // would make a Chinese sidecar unreachable. Falls back to the interface
++  // language when the preference is "auto".
++  const language = usePreferencesStore((s) =>
++    resolveCardTextLanguage(s.language, s.cardTextLanguage),
++  );
+   const [data, setData] = useState<EngineCardFace | null>(null);
+ 
+   useEffect(() => {
+@@ -101,7 +108,13 @@ export function useEngineCardData(cardName: string | null): EngineCardFace | nul
+  * card name — the engine's identity key, which stays English everywhere.
+  */
+ export function useLocalizedCardName(name: string | null): string | null {
+-  const language = usePreferencesStore((s) => s.language);
++  // Card TEXT follows its own preference, not the interface language: the
++  // interface has no Chinese catalog, so keying card text off `language`
++  // would make a Chinese sidecar unreachable. Falls back to the interface
++  // language when the preference is "auto".
++  const language = usePreferencesStore((s) =>
++    resolveCardTextLanguage(s.language, s.cardTextLanguage),
++  );
+   const [localized, setLocalized] = useState<string | null>(name);
+ 
+   useEffect(() => {
+diff --git a/client/src/services/cardTextLocale.ts b/client/src/services/cardTextLocale.ts
+new file mode 100644
+index 0000000000..c7df048912
+--- /dev/null
++++ b/client/src/services/cardTextLocale.ts
+@@ -0,0 +1,72 @@
++/**
++ * Card-TEXT locale vocabulary: which languages a card's name / Oracle text /
++ * type line can be displayed in, and how a stored preference resolves to one.
++ *
++ * A THIRD axis, independent of both the interface language (`SUPPORTED_LNGS`) and
++ * the card-art language (`ART_LANGUAGES`). The three sets are not nested in any
++ * direction, and card TEXT is the one that needs its own switch:
++ *
++ *   - `zhs` has text (from the 大学院废墟 dataset, via
++ *     `scripts/gen-zhs-card-text.mjs`) and art, but NO UI catalog. A player who
++ *     wants to read Chinese cards is not thereby asking for a Chinese interface —
++ *     and until a chrome translation exists, coupling the two would mean either
++ *     no Chinese cards or a broken UI.
++ *   - `pl` has a UI catalog and no localized card text at all (MTGJSON carries
++ *     zero Polish `foreignData`), so it cannot appear here.
++ *
++ * The loaders tolerate every value: `ensureCardLocale` (engineRuntime.ts)
++ * resolves a missing sidecar to an empty map and callers fall back to English
++ * PER FIELD. So an unrecognized or unpublished locale degrades to English text
++ * rather than breaking a card.
++ */
++
++/** Locales the app ships a card-content sidecar for (`card-data.<lng>.json`).
++ *  `en` is listed because it is a selectable answer, not because a sidecar
++ *  exists — English is the card data itself, so `ensureCardLocale("en")` is a
++ *  deliberate no-op. */
++export const CARD_TEXT_LANGUAGES = [
++  "en",
++  "es",
++  "fr",
++  "de",
++  "it",
++  "pt",
++  "ja",
++  "zhs",
++] as const;
++export type CardTextLanguage = (typeof CARD_TEXT_LANGUAGES)[number];
++
++export function isCardTextLanguage(value: unknown): value is CardTextLanguage {
++  return typeof value === "string" && (CARD_TEXT_LANGUAGES as readonly string[]).includes(value);
++}
++
++/** Card-text language, or `"auto"` to follow the interface language. */
++export type CardTextLanguagePreference = "auto" | CardTextLanguage;
++
++/**
++ * Reduce an untrusted (persisted or user-supplied) value to a legal card-text
++ * preference. Anything unrecognized becomes `"auto"` — the behaviour the app had
++ * before this preference existed — so a stale or hand-edited blob can never
++ * select a locale no sidecar can satisfy.
++ */
++export function normalizeCardTextLanguage(value: unknown): CardTextLanguagePreference {
++  if (value === "auto") return "auto";
++  return isCardTextLanguage(value) ? value : "auto";
++}
++
++/**
++ * The card-text locale to resolve in, given the interface language and the
++ * preference (`"auto"` = follow the interface).
++ *
++ * Total and never-throwing, mirroring `resolveArtLanguage`: an unrecognized
++ * preference falls back to the interface language rather than producing a locale
++ * the sidecar loader cannot satisfy, which is what makes it safe to call on a
++ * value that came out of localStorage.
++ */
++export function resolveCardTextLanguage(
++  language: string,
++  cardTextLanguage: string | undefined,
++): string {
++  if (cardTextLanguage === "auto" || cardTextLanguage === undefined) return language;
++  return isCardTextLanguage(cardTextLanguage) ? cardTextLanguage : language;
++}
+diff --git a/client/src/stores/preferencesStore.ts b/client/src/stores/preferencesStore.ts
+index bb0ffd8260..1a56184744 100644
+--- a/client/src/stores/preferencesStore.ts
++++ b/client/src/stores/preferencesStore.ts
+@@ -26,6 +26,10 @@ import { DEFAULT_AI_DIFFICULTY } from "../constants/ai";
+ import type { DeckArchetype } from "../services/engineRuntime";
+ import { detectInitialLanguage, normalizeSupportedLng, type SupportedLng } from "../i18n/resources";
+ import { isArtLanguage, type ArtLanguage } from "../services/cardArtLocale.ts";
++import {
++  normalizeCardTextLanguage,
++  type CardTextLanguagePreference,
++} from "../services/cardTextLocale.ts";
+ 
+ /** Literal sentinel for "any deck" in AI deck selection. Mirrors `DeckChoice::Random`
+  *  naming so the preference value is self-describing without a nullable field. */
+@@ -308,6 +312,10 @@ function buildDefaultPreferences(): PreferencesState {
+   return {
+     language: detectInitialLanguage(),
+     artLanguage: "auto",
++    // This fork ships Chinese card text by default rather than following the
++    // interface language: the interface has no Chinese catalog, so "auto" would
++    // resolve to the (non-Chinese) UI language and the sidecar would never load.
++    cardTextLanguage: "zhs",
+     cardSize: "medium",
+     hudLayout: "inline",
+     followActiveOpponent: true,
+@@ -378,6 +386,12 @@ interface PreferencesState {
+   /** Card-art language, or `"auto"` to follow `language`. Resolution lives in
+    *  `resolveArtLanguage` so the store field stays a plain preference. */
+   artLanguage: ArtLanguagePreference;
++  /** Card-TEXT language (name / Oracle text / type line), or `"auto"` to follow
++   *  `language`. Independent of `artLanguage`: the two sets differ (Polish has a
++   *  UI and no localized text; Chinese has text and art but no UI catalog), so a
++   *  player may read Chinese cards with non-Chinese art or the reverse. Resolution
++   *  lives in `resolveCardTextLanguage` so the store field stays a preference. */
++  cardTextLanguage: CardTextLanguagePreference;
+   cardSize: CardSizePreference;
+   hudLayout: HudLayout;
+   followActiveOpponent: boolean;
+@@ -493,6 +507,7 @@ interface PreferencesState {
+ interface PreferencesActions {
+   setLanguage: (lng: SupportedLng) => void;
+   setArtLanguage: (lng: ArtLanguagePreference) => void;
++  setCardTextLanguage: (lng: CardTextLanguagePreference) => void;
+   setCardSize: (size: CardSizePreference) => void;
+   setHudLayout: (layout: HudLayout) => void;
+   setFollowActiveOpponent: (enabled: boolean) => void;
+@@ -643,6 +658,7 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+       // Card art only — deliberately does NOT touch `language`, so a player can
+       // read the UI in English and still play with Chinese cards.
+       setArtLanguage: (lng) => set({ artLanguage: lng }),
++      setCardTextLanguage: (lng) => set({ cardTextLanguage: lng }),
+       setCardSize: (size) => set({ cardSize: size }),
+       setHudLayout: (layout) => set({ hudLayout: layout }),
+       setFollowActiveOpponent: (enabled) => set({ followActiveOpponent: enabled }),
+@@ -1178,6 +1194,9 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+           ...migrated,
+           language: normalizeSupportedLng(migrated.language, detectInitialLanguage()),
+           artLanguage: normalizeArtLanguage(migrated.artLanguage),
++          cardTextLanguage: normalizeCardTextLanguage(
++            migrated.cardTextLanguage,
++          ),
+         };
+       },
+       // Persisted state is external input. Migration only runs when the schema
+@@ -1192,6 +1211,9 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
+           ...saved,
+           language: normalizeSupportedLng(saved.language, current.language),
+           artLanguage: normalizeArtLanguage(saved.artLanguage),
++          cardTextLanguage: normalizeCardTextLanguage(
++            saved.cardTextLanguage,
++          ),
+           logDockSide: saved.logDockSide === "left" || saved.logDockSide === "right"
+             ? saved.logDockSide
+             : "right",

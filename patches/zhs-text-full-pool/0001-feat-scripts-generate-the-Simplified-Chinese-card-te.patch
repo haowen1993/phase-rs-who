@@ -1,0 +1,323 @@
+From b723fd9e16fc8c55f9b37adf49298e0932345518 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 11:31:28 +0800
+Subject: [PATCH 1/4] =?UTF-8?q?feat(scripts):=20generate=20the=20Simplifie?=
+ =?UTF-8?q?d-Chinese=20card-text=20sidecar=20from=20=E5=A4=A7=E5=AD=A6?=
+ =?UTF-8?q?=E9=99=A2=E5=BA=9F=E5=A2=9F?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Scryfall publishes no Simplified-Chinese printings, so `oracle_gen`'s MTGJSON
+`foreignData` sweep — the source of every other `card-data.<lng>.json` — can
+never produce `zhs`. This adds the one locale from the community dataset
+(HeliumOctahelide/magic-cards-zhs, weekly GitHub release) instead.
+
+Deliberately a STANDALONE script, not an `oracle-gen` arm: `card-data.json`
+already carries `scryfall_oracle_id` for every face, so the join needs no engine
+code and runs in seconds rather than behind a `tool`-profile rebuild.
+
+Three properties of the dataset had to be measured and handled:
+
+  * 2,351 of 39,959 lines are malformed — a literal double quote escaped TWICE
+    (`\\"`), which is not a legal JSON escape, so `JSON.parse` rejects the whole
+    line. Repairing the raw line (`\"` → `"`) makes all 39,959 parse.
+  * Every multi-line record encodes its line breaks as TWO backslashes plus `n`
+    (22,195 records; 0 with a real newline). The engine's Oracle parser is
+    line-oriented, so this must become a real break. Matching one backslash is
+    the subtle wrong answer: it consumes the pair and leaves `\` + newline.
+  * 73 occurrences across 52 records still carry Forge's `CARDNAME` template
+    token, which would render literally. Expanded to the record's own localized
+    name. No other template token exists in the dataset.
+
+Quality tier `text_stage` 0 (3,192 records, unlicensed/unsourced) is dropped by
+default; `--all-stages` opts back in. Records are per-PRINTING while the sidecar
+is per-CARD-NAME, so ties reduce by stage, then release date, then collector
+number, never by file order.
+
+Measured on the current 362-card pool: 358/358 usable keys covered (100%).
+Text is CC-BY-SA-4.0 and attributed in the script's output.
+---
+ .gitignore                    |   6 +
+ scripts/gen-zhs-card-text.mjs | 258 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 264 insertions(+)
+ create mode 100644 scripts/gen-zhs-card-text.mjs
+
+diff --git a/.gitignore b/.gitignore
+index 766ed40185..392b4ee41a 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -144,3 +144,9 @@ triage/dashboard.md
+ # Changelog backfill drafts — review staging only, never committed. The
+ # canonical changelog lives at client/public/changelog.json.
+ scripts/changelog/backfill-drafts.json
++
++# 大学院废墟 (magic-cards-zhs) weekly export cache — the ~74 MB tarball and its
++# extraction, downloaded on demand by scripts/gen-zhs-card-text.mjs. The derived
++# sidecar it produces (`client/public/card-data.zhs.json`) is already covered by
++# the `client/public/card-data.*.json` rule above.
++.zhs-cache/
+diff --git a/scripts/gen-zhs-card-text.mjs b/scripts/gen-zhs-card-text.mjs
+new file mode 100644
+index 0000000000..b37b29a63a
+--- /dev/null
++++ b/scripts/gen-zhs-card-text.mjs
+@@ -0,0 +1,258 @@
++#!/usr/bin/env node
++// Generate the Simplified-Chinese card-content sidecar (`card-data.zhs.json`)
++// from the 大学院废墟 (HeliumOctahelide/magic-cards-zhs) weekly data export.
++//
++// WHY THIS EXISTS: Scryfall publishes no Simplified-Chinese printings at all, so
++// `oracle_gen`'s MTGJSON `foreignData` sweep — the source of every other
++// `card-data.<lng>.json` — can never produce `zhs`. This script fills that one
++// locale from the community dataset instead.
++//
++// It is deliberately a STANDALONE script rather than part of `oracle-gen`:
++// `card-data.json` already carries `scryfall_oracle_id` for every face, so the
++// join needs no engine code, and running it costs seconds instead of a
++// `tool`-profile engine rebuild.
++//
++// Usage:
++//   node scripts/gen-zhs-card-text.mjs                    # pinned release
++//   node scripts/gen-zhs-card-text.mjs --release data-2026-10-04
++//   node scripts/gen-zhs-card-text.mjs --all-stages       # include stage 0
++//   node scripts/gen-zhs-card-text.mjs --dry-run          # report, write nothing
++//
++// Output: client/public/card-data.zhs.json
++//   { "<lowercased english name>": { name, oracle_text, type_line } }
++//   — the exact shape `oracle-gen` writes for de/es/fr/it/ja/pt, and the shape
++//   `ensureCardLocale` (client/src/services/engineRuntime.ts) consumes.
++
++import { createWriteStream, existsSync } from "node:fs";
++import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
++import { createInterface } from "node:readline";
++import { Readable } from "node:stream";
++import { pipeline } from "node:stream/promises";
++import { dirname, join, resolve } from "node:path";
++import { fileURLToPath } from "node:url";
++
++const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
++
++const argv = process.argv.slice(2);
++const flag = (name) => argv.includes(`--${name}`);
++const option = (name, fallback) => {
++  const i = argv.indexOf(`--${name}`);
++  return i === -1 || i === argv.length - 1 ? fallback : argv[i + 1];
++};
++
++const release = option("release", "data-2026-10-04");
++const dryRun = flag("dry-run");
++const allStages = flag("all-stages");
++const sourceDir = resolve(repoRoot, option("source-dir", ".zhs-cache"));
++const outPath = resolve(repoRoot, "client/public/card-data.zhs.json");
++const releaseDir = join(sourceDir, release);
++const oraclePath = join(releaseDir, "zhs_oracle.json");
++
++const TARBALL = `magic-cards-zhs-${release}.tar.gz`;
++const URL = `https://github.com/HeliumOctahelide/magic-cards-zhs/releases/download/${release}/${TARBALL}`;
++
++// The dataset's quality tier. `text_stage` 5 is the MTGZH/MTGso bulk, 9 is the
++// official tier, and 0 is untranslated/unsourced (3,192 records). Dropping 0 is
++// the difference between "we ship translations" and "we ship whatever was in the
++// field that day", so it is the default; `--all-stages` opts back in.
++const MIN_STAGE = allStages ? 0 : 5;
++
++/** Un-escape the dataset's one systematic malformation.
++ *
++ * 2,351 of 39,959 lines escape a literal double quote TWICE (`\\"`), which is
++ * not a legal JSON escape, so `JSON.parse` rejects the whole line. Replacing the
++ * two-character sequence `\"` → `"` repairs every affected line (measured: 39,959
++ * / 39,959 parse afterwards) and is a no-op on every other line.
++ *
++ * Applied to the RAW line BEFORE parsing, because the damage is inside the JSON
++ * string syntax — repairing after parse is impossible.
++ */
++const repairLine = (line) => line.replaceAll('\\\\"', '\\"');
++
++/** Substitute the dataset's one unexpanded template token: `CARDNAME`.
++ *
++ * Some records are machine-derived from Forge card scripts and still carry
++ * Forge's `CARDNAME` placeholder instead of the card's name (measured: 73
++ * occurrences across 52 of the 358 pool records — 14.5%). Left as-is it renders
++ * literally in the card text.
++ *
++ * Replaced with the record's own localized name, because the token stands for
++ * the card's name AS PRINTED and the surrounding text is localized. Falling back
++ * to the English key keeps a nameless record readable rather than printing the
++ * token. No other template token exists in the dataset (measured: zero
++ * occurrences of any other all-caps placeholder). */
++const expandCardName = (text, localizedName, englishName) =>
++  typeof text === "string"
++    ? text.replaceAll("CARDNAME", localizedName || englishName)
++    : text ?? undefined;
++
++/** Normalize the dataset's newline encoding to real line breaks.
++ *
++ * Every multi-line record escapes its line breaks TWICE — the parsed value
++ * carries the three characters `\`, `\`, `n` (measured: 22,195 records with that
++ * shape, 0 with a real newline, 14,735 single-line records with neither). The
++ * engine's Oracle parser is line-oriented, so a card handed `\\n` instead of a
++ * break would be parsed as one long line.
++ *
++ * The match is therefore the TWO backslashes plus `n`, replaced by one newline.
++ * Matching only `\n` (one backslash) is the subtle wrong answer: it consumes the
++ * pair and leaves the second backslash behind, yielding `\` + newline.
++ *
++ * A single-line record is unaffected, and an Oracle text has no legitimate
++ * `\\n`, so this cannot damage a value that was already correct. */
++const unescapeNewlines = (text) =>
++  typeof text === "string" ? text.replaceAll("\\\\n", "\n") : text ?? undefined;
++
++/** Pick the best of the several records that share one `oracle_id`.
++ *
++ * The dataset is per-PRINTING (39,959 records over 38,932 oracle ids) while the
++ * sidecar is per-CARD-NAME, so a deterministic reduction is required. Order:
++ * higher `text_stage` wins, then the later `released_at` (a reprint's text is
++ * the more likely current Oracle wording), then `collector_number` so the result
++ * never depends on file order. */
++function betterRecord(a, b) {
++  const stage = (r) => r.text_stage ?? -1;
++  if (stage(a) !== stage(b)) return stage(a) > stage(b) ? a : b;
++  const rel = (r) => r.released_at ?? "";
++  if (rel(a) !== rel(b)) return rel(a) > rel(b) ? a : b;
++  return (a.collector_number ?? "") <= (b.collector_number ?? "") ? a : b;
++}
++
++async function ensureSource() {
++  if (existsSync(oraclePath)) {
++    console.log(`source: reusing ${oraclePath}`);
++    return;
++  }
++  if (dryRun) {
++    throw new Error(
++      `--dry-run needs an extracted ${oraclePath}; fetch it first with\n` +
++        `  node scripts/gen-zhs-card-text.mjs --release ${release}`,
++    );
++  }
++  console.log(`source: downloading ${TARBALL} (~74 MB) ...`);
++  await mkdir(releaseDir, { recursive: true });
++  const response = await fetch(URL);
++  if (!response.ok) {
++    throw new Error(`download failed: HTTP ${response.status} for ${URL}`);
++  }
++  const tarball = join(sourceDir, TARBALL);
++  await pipeline(Readable.fromWeb(response.body), createWriteStream(tarball));
++
++  // Extract only the one member we need — `scryfall_card.json` alone is 247 MB.
++  console.log("source: extracting zhs_oracle.json ...");
++  const { execFile } = await import("node:child_process");
++  const { promisify } = await import("node:util");
++  await promisify(execFile)("tar", ["xzf", tarball, "-C", releaseDir, "zhs_oracle.json"]);
++  await rm(tarball, { force: true });
++  console.log(`source: extracted to ${oraclePath}`);
++}
++
++/** Lowercased English name -> oracle id, for the faces the card pool contains. */
++async function loadPool() {
++  const raw = await readFile(resolve(repoRoot, "client/public/card-data.json"), "utf8");
++  const pool = JSON.parse(raw);
++  const byOracle = new Map();
++  let multiFace = 0;
++  for (const [name, face] of Object.entries(pool)) {
++    const oracleId = face.scryfall_oracle_id;
++    if (!oracleId) continue;
++    // Single-faced only, mirroring `oracle_gen::collect_localized`: MTGJSON and
++    // this dataset both expose multi-face cards as one combined "A // B" record,
++    // and writing that under a single face's key would put a wrong value where
++    // the English fallback belongs.
++    if (name.includes("//")) {
++      multiFace += 1;
++      continue;
++    }
++    byOracle.set(oracleId, name);
++  }
++  console.log(`pool: ${Object.keys(pool).length} faces, ${byOracle.size} usable keys (${multiFace} multi-face skipped)`);
++  return byOracle;
++}
++
++async function main() {
++  await ensureSource();
++  const byOracle = await loadPool();
++
++  const best = new Map();
++  const stats = {
++    lines: 0,
++    malformed: 0,
++    noChinese: 0,
++    belowStage: 0,
++    notInPool: 0,
++  };
++
++  const rl = createInterface({
++    input: (await import("node:fs")).createReadStream(oraclePath),
++    crlfDelay: Infinity,
++  });
++  for await (const rawLine of rl) {
++    const line = rawLine.trim();
++    if (!line) continue;
++    stats.lines += 1;
++    let record;
++    try {
++      record = JSON.parse(line);
++    } catch {
++      stats.malformed += 1;
++      try {
++        record = JSON.parse(repairLine(line));
++      } catch {
++        continue; // unrepairable; counted and skipped rather than aborting
++      }
++    }
++    const oracleId = record.oracle_id ?? record.face_oracle_id;
++    const name = byOracle.get(oracleId);
++    if (!name) {
++      stats.notInPool += 1;
++      continue;
++    }
++    if (!record.translated_name && !record.translated_text) {
++      stats.noChinese += 1;
++      continue;
++    }
++    if ((record.text_stage ?? -1) < MIN_STAGE) {
++      stats.belowStage += 1;
++      continue;
++    }
++    const previous = best.get(oracleId);
++    best.set(oracleId, previous ? betterRecord(previous, record) : record);
++  }
++
++  const sidecar = {};
++  for (const [oracleId, record] of best) {
++    const englishName = byOracle.get(oracleId);
++    const localizedName = record.translated_name ?? undefined;
++    sidecar[englishName] = {
++      name: localizedName,
++      oracle_text: expandCardName(
++        unescapeNewlines(record.translated_text),
++        localizedName,
++        englishName,
++      ),
++      type_line: record.translated_type ?? undefined,
++    };
++  }
++
++  const covered = Object.keys(sidecar).length;
++  const poolSize = byOracle.size;
++  console.log("");
++  console.log(`dataset: ${stats.lines} lines, ${stats.malformed} malformed (repaired)`);
++  console.log(`  skipped: ${stats.belowStage} below stage ${MIN_STAGE}, ` +
++    `${stats.noChinese} without Chinese, ${stats.notInPool} not in this card pool`);
++  console.log(`sidecar: ${covered} / ${poolSize} pool faces (${((covered / poolSize) * 100).toFixed(1)}%)`);
++
++  if (dryRun) {
++    console.log("--dry-run: nothing written");
++    return;
++  }
++  await writeFile(outPath, JSON.stringify(sidecar));
++  const { size } = await import("node:fs").then((fs) => fs.promises.stat(outPath));
++  console.log(`wrote ${outPath} (${(size / 1024 / 1024).toFixed(2)} MB)`);
++  console.log(
++    "attribution: card text from 大学院废墟 (HeliumOctahelide/magic-cards-zhs), CC-BY-SA-4.0",
++  );
++}
++
++await main();

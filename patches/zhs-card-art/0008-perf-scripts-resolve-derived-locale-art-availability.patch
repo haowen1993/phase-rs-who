@@ -1,0 +1,498 @@
+From 542bce5516e5687441f1203425d6e31d2b703298 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 13:17:59 +0800
+Subject: [PATCH 8/8] perf(scripts): resolve derived-locale art availability
+ from the index API
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The availability sidecar asked the CDN once per printing (`GET` + `Range:
+bytes=0-0`). That was right about SCRYFALL — no Scryfall field records whether a
+derived locale has art for an English printing id — and wrong about the CDN
+operator: 大学院废墟 publishes its own index, and for every printing it answers
+exactly this question (`zhs_image_url` is the URL when the art exists, null when
+it does not). Measured on Doctor Who, the index and a full probe agree on all 1178
+printings — 398 available, zero disagreements in either direction — so the probe
+was buying the same boolean for ~70,000 requests instead of ~70.
+
+Full pool, measured: 336 sets, 71,788 printings, 346 requests, 355 s, 40,887 ids
+written. The old path at the same scale is ~68,000 requests (hours).
+
+The probe is KEPT, not replaced: it depends on nothing but the CDN, so it remains
+the fallback when the index is unreachable or has not caught up. Both writers emit
+the same document and the same `ids` list — only `algorithm` and `source` record
+which produced a file, so the client cannot tell them apart. Select with
+PHASE_AVAILABILITY_METHOD=index|probe; a typo is rejected rather than silently
+falling back, because the wrong choice costs an hour.
+
+Two API parameters are load-bearing and documented at the call site:
+
+  * `include_extras=true` — the index excludes supplemental cards by default, and
+    Doctor Who's 40 planechase cards are extras. Without it the WHO answer is 358
+    printings instead of 398, silently dropping art the client would prefer.
+  * `unique=scryfall_id` — the default deduplicates to one representative version
+    per Oracle object (318 for the same set), which cannot answer a per-printing
+    question at all.
+
+Rate limiting is by request FREQUENCY, not concurrency: a burst draws 429s and the
+response carries no Retry-After or rate-limit header, so pacing is ours (3 workers
+plus a shared inter-request delay, and multiplicative backoff with jitter on 429).
+The coverage check is what makes that safe — it refuses to write a sidecar when any
+expected printing was never returned, so an interrupted run fails loudly instead of
+recording "no art" for printings it never asked about. That check caught a real
+21,510-printing shortfall during development.
+---
+ scripts/gen-derived-art-availability.sh     |  88 ++++--
+ scripts/lib/fetch-index-art-availability.py | 279 ++++++++++++++++++++
+ 2 files changed, 349 insertions(+), 18 deletions(-)
+ create mode 100644 scripts/lib/fetch-index-art-availability.py
+
+diff --git a/scripts/gen-derived-art-availability.sh b/scripts/gen-derived-art-availability.sh
+index b63e0821a7..1261febda8 100755
+--- a/scripts/gen-derived-art-availability.sh
++++ b/scripts/gen-derived-art-availability.sh
+@@ -1,14 +1,17 @@
+ #!/usr/bin/env bash
+ set -euo pipefail
+ 
+-# Measure which printings a COMMUNITY-CDN art locale actually has art for, and
++# Resolve which printings a COMMUNITY-CDN art locale actually has art for, and
+ # write the result as an availability sidecar.
+ #
+ #     ./scripts/gen-derived-art-availability.sh                    # zhs, whole pool
+ #     ./scripts/gen-derived-art-availability.sh zhs _WHO           # zhs, one product
+ #     PHASE_AVAILABILITY_SCOPE=_WHO ./scripts/gen-derived-art-availability.sh
+ #
+-# ── Why this cannot be derived ──────────────────────────────────────────────
++#     PHASE_AVAILABILITY_METHOD=probe ./scripts/gen-derived-art-availability.sh
++#       Force the CDN-probing fallback instead of the index API (see below).
++#
++# ── Why this cannot be derived from Scryfall ────────────────────────────────
+ #
+ # The mapped locales (de/es/fr/it/ja/pt) get their sidecar by joining MTGJSON
+ # `foreignData` to Scryfall's bulk export: a localized printing is a real Scryfall
+@@ -18,10 +21,23 @@ set -euo pipefail
+ # community art under the ENGLISH printing's id, so no Scryfall field records
+ # availability, and the split is arbitrary even inside one set — Doctor Who #318
+ # of a card has a Chinese image while #528, #909 and #1119 of the same card do
+-# not. Membership can only be measured, so it is measured here and shipped as a
+-# set the client consults when choosing which printing to render.
++# not. Membership has to come from the CDN operator, and it is shipped as a set
++# the client consults when choosing which printing to render.
++#
++# ── Two ways to obtain it, and why the index is the default ─────────────────
++#
++# The CDN operator publishes its own index API, and for every printing it answers
++# exactly the question this sidecar encodes: a per-printing image URL when the art
++# exists, null when it does not. Measured on Doctor Who, that answer and a full
++# CDN probe agree on all 1178 printings (398 available, zero disagreements in
++# either direction), for ~70 requests instead of ~70,000.
++#
++# The probe is kept, not replaced: it depends on nothing but the CDN itself, so it
++# stays the fallback when the index is unreachable, rate-limited, or behind. Both
++# writers emit the same document and the same `ids` list, so the client cannot
++# tell which produced a given file — only `algorithm` and `source` record it.
+ #
+-# ── Probing rules (both are load-bearing) ───────────────────────────────────
++# ── Probing rules (both are load-bearing, for METHOD=probe) ─────────────────
+ #
+ # GET, never HEAD: the CDN answers 404 to HEAD on an object that is not in its
+ # edge cache and 200 to GET on the same URL. A HEAD-based run reports ~0%
+@@ -29,9 +45,6 @@ set -euo pipefail
+ #
+ # `Range: bytes=0-0` keeps each probe to one byte (206 when present, 404 when
+ # absent) instead of downloading every image in the pool.
+-#
+-# Prints are the only input, so a pool of N printings costs N tiny requests.
+-# Doctor Who's 1178 printings finish in well under a minute at this parallelism.
+ 
+ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+@@ -41,16 +54,38 @@ SCOPE="${2:-${PHASE_AVAILABILITY_SCOPE:-}}"
+ OUTPUT_DIR="${PHASE_AVAILABILITY_OUTPUT_DIR:-$REPO_ROOT/client/public}"
+ MTGJSON_SETS="${MTGJSON_SETS_DIR:-$REPO_ROOT/data/mtgjson/sets}"
+ SET_LIST="${MTGJSON_SET_LIST_FILE:-$REPO_ROOT/data/mtgjson/SetList.json}"
+-# CDN host and path prefix for the locale. `zhs` is 大学院废墟 (mtgch.com), the
+-# only community CDN wired up today; adding another means adding its shape here.
++# `index` reads the CDN operator's own per-printing index; `probe` asks the CDN
++# once per printing. See the header for why the index is the default and the probe
++# is kept. Any other value is rejected rather than silently falling back — a typo
++# must not cost an hour of probing.
++METHOD="${PHASE_AVAILABILITY_METHOD:-index}"
++# CDN host, path prefix, and index API for the locale. `zhs` is 大学院废墟
++# (mtgch.com), the only community CDN wired up today; adding another means adding
++# its shape here.
+ case "$LANG_CODE" in
+-  zhs) CDN_HOST="images.mtgch.com"; CDN_PREFIX="zhs" ;;
++  zhs)
++    CDN_HOST="images.mtgch.com"
++    CDN_PREFIX="zhs"
++    INDEX_API="https://mtgch.com/api/v2"
++    ;;
+   *)
+     echo "ERROR: no CDN shape known for derived locale '$LANG_CODE'." >&2
+-    echo "  Add its host and path prefix to the case statement above." >&2
++    echo "  Add its host, path prefix, and index API to the case statement above." >&2
+     exit 2
+     ;;
+ esac
++case "$METHOD" in
++  index|probe) ;;
++  *)
++    echo "ERROR: unknown PHASE_AVAILABILITY_METHOD='$METHOD' (want 'index' or 'probe')." >&2
++    exit 2
++    ;;
++esac
++if [ "$METHOD" = "index" ] && [ -z "${INDEX_API:-}" ]; then
++  echo "ERROR: no index API known for derived locale '$LANG_CODE'." >&2
++  echo "  Use PHASE_AVAILABILITY_METHOD=probe, or add its index API above." >&2
++  exit 2
++fi
+ 
+ if [ ! -d "$MTGJSON_SETS" ]; then
+   echo "ERROR: MTGJSON set files not found at $MTGJSON_SETS" >&2
+@@ -65,9 +100,10 @@ fi
+ # Collect printing ids from the set files. Scoping by SET CODE (the `_WHO` suffix
+ # that MTGJSON gives Doctor Who decks) keeps a single-product channel's sidecar
+ # small — 1178 printings instead of the whole pool.
+-echo "=== Derived art availability ($LANG_CODE${SCOPE:+ scope=$SCOPE}) ==="
++echo "=== Derived art availability ($LANG_CODE${SCOPE:+ scope=$SCOPE} via $METHOD) ==="
+ IDS_FILE="$(mktemp)"
+-trap 'rm -f "$IDS_FILE"' EXIT
++SET_CODES_FILE="$(mktemp)"
++trap 'rm -f "$IDS_FILE" "$SET_CODES_FILE"' EXIT
+ 
+ if [ -n "$SCOPE" ]; then
+   # `_WHO` -> `WHO`; the suffix is the deck-id convention, the set code is not
+@@ -80,6 +116,7 @@ if [ -n "$SCOPE" ]; then
+   fi
+   jq -r '.data.cards[]? | select(.identifiers.scryfallId != null) | .identifiers.scryfallId' \
+     "$SET_FILE" | sort -u > "$IDS_FILE"
++  printf '%s\n' "$SET_CODE" > "$SET_CODES_FILE"
+ else
+   # Every set file MTGJSON gave us. `paths` is deliberately not used here: the
+   # pool is whatever has been downloaded, which is what the client will ship.
+@@ -87,6 +124,13 @@ else
+     jq -r '.data.cards[]? | select(.identifiers.scryfallId != null) | .identifiers.scryfallId' \
+       "$set_file" 2>/dev/null || true
+   done | sort -u > "$IDS_FILE"
++  # The index is queried per set, so the set list is derived from the same files
++  # the ids came from. MTGJSON names each file after the set code, and `code` in
++  # the body is written in caps; the API's `set:` operator is case-insensitive, so
++  # the filename stem is used as-is rather than re-reading every file for it.
++  for set_file in "$MTGJSON_SETS"/*.json; do
++    basename "$set_file" .json
++  done | sort -u > "$SET_CODES_FILE"
+ fi
+ 
+ TOTAL=$(wc -l < "$IDS_FILE" | tr -d ' ')
+@@ -94,11 +138,19 @@ if [ "$TOTAL" = 0 ]; then
+   echo "ERROR: no printing ids collected. Is the MTGJSON cache populated?" >&2
+   exit 1
+ fi
+-echo "Probing $TOTAL printings on $CDN_HOST/$CDN_PREFIX/ ..."
+ 
+ OUTPUT="$OUTPUT_DIR/scryfall-images.$LANG_CODE-available.json"
+ mkdir -p "$OUTPUT_DIR"
+ 
+-LANG_CODE="$LANG_CODE" CDN_HOST="$CDN_HOST" CDN_PREFIX="$CDN_PREFIX" \
+-  IDS_FILE="$IDS_FILE" OUTPUT="$OUTPUT" SCOPE="$SCOPE" \
+-  python3 "$SCRIPT_DIR/lib/probe-derived-art-availability.py"
++if [ "$METHOD" = "index" ]; then
++  echo "Resolving $TOTAL printings across $(wc -l < "$SET_CODES_FILE" | tr -d ' ') set(s) via $INDEX_API ..."
++  LANG_CODE="$LANG_CODE" SOURCE_URL="$INDEX_API" \
++    IDS_FILE="$IDS_FILE" SET_CODES_FILE="$SET_CODES_FILE" \
++    OUTPUT="$OUTPUT" SCOPE="$SCOPE" \
++    python3 "$SCRIPT_DIR/lib/fetch-index-art-availability.py"
++else
++  echo "Probing $TOTAL printings on $CDN_HOST/$CDN_PREFIX/ ..."
++  LANG_CODE="$LANG_CODE" CDN_HOST="$CDN_HOST" CDN_PREFIX="$CDN_PREFIX" \
++    IDS_FILE="$IDS_FILE" OUTPUT="$OUTPUT" SCOPE="$SCOPE" \
++    python3 "$SCRIPT_DIR/lib/probe-derived-art-availability.py"
++fi
+diff --git a/scripts/lib/fetch-index-art-availability.py b/scripts/lib/fetch-index-art-availability.py
+new file mode 100644
+index 0000000000..65cb8d4257
+--- /dev/null
++++ b/scripts/lib/fetch-index-art-availability.py
+@@ -0,0 +1,279 @@
++#!/usr/bin/env python3
++"""Fetch a community CDN's per-printing art availability from its own index API.
++
++Invoked by `scripts/gen-derived-art-availability.sh`, which owns argument
++parsing, the MTGJSON scan, and the locale-to-source mapping. Everything here is
++the fetching plus the sidecar it writes.
++
++── Why this replaced blind CDN probing ────────────────────────────────────────
++
++The original implementation asked the CDN once per printing (`GET` + `Range:
++bytes=0-0`) because no Scryfall field records whether a derived locale has art for
++an English printing id. That reasoning was right about SCRYFALL and wrong about
++the CDN operator: 大学院废墟 publishes its own index, and for every printing it
++answers exactly the question this file needs — `zhs_image_url` is the URL when the
++art exists and `null` when it does not. Measured on Doctor Who, the API's answer
++and a full probe agree on every one of the 1178 printings (398 available, 0
++disagreements in either direction), so the probe was buying the same boolean for
++~70,000 requests instead of ~70.
++
++The two implementations are kept side by side rather than one replacing the other:
++`probe-derived-art-availability.py` remains correct and dependency-free, and is
++the fallback when this index is unreachable or has not caught up.
++
++── Two rules that are easy to get wrong ───────────────────────────────────────
++
++`include_extras=true` is REQUIRED, not an optimization. The index excludes
++supplemental cards by default, and Doctor Who's 40 planechase cards are extras:
++without the flag the WHO answer is 358 printings instead of 398, silently dropping
++art the client would otherwise prefer. Any new locale must re-check this.
++
++`unique=scryfall_id` is what makes the query per-PRINTING. The default
++deduplicates to a representative version per Oracle object (`count: 318` for the
++same set), which cannot answer a per-printing question at all.
++
++Requests are grouped by set and paginated at the API's 1000-item maximum, so cost
++scales with the number of sets (~70 for the current pool) rather than printings.
++"""
++
++import json
++import os
++import random
++import sys
++import threading
++import time
++import urllib.error
++import urllib.parse
++import urllib.request
++from concurrent.futures import ThreadPoolExecutor
++
++LANG_CODE = os.environ["LANG_CODE"]
++SOURCE_URL = os.environ["SOURCE_URL"]
++IDS_FILE = os.environ["IDS_FILE"]
++SET_CODES_FILE = os.environ["SET_CODES_FILE"]
++OUTPUT = os.environ["OUTPUT"]
++SCOPE = os.environ.get("SCOPE", "")
++
++PAGE_SIZE = 1000
++WORKERS = int(os.environ.get("PHASE_AVAILABILITY_WORKERS", "3"))
++RETRIES = int(os.environ.get("PHASE_AVAILABILITY_RETRIES", "5"))
++TIMEOUT = int(os.environ.get("PHASE_AVAILABILITY_TIMEOUT", "60"))
++USER_AGENT = "phase-rs-card-art-availability/1.0"
++
++# The index rate-limits by request FREQUENCY, not concurrency or volume: a burst
++# of a hundred parallel page fetches draws 429s while twelve sequential requests
++# do not, and the 429 carries no Retry-After or rate-limit header to pace against.
++# So pacing is ours: few workers, and a proportional throttle between requests.
++# A run that draws 429s still finishes — the coverage check below refuses to write
++# a partial file, so the failure mode is "run it again", never "silently missing
++# art".
++REQUEST_DELAY = float(os.environ.get("PHASE_AVAILABILITY_DELAY", "0.25"))
++RATE_LIMIT_BACKOFF = float(os.environ.get("PHASE_AVAILABILITY_BACKOFF", "5"))
++
++
++class RateLimiter:
++    """Serialize requests to at most one per `delay`, shared across workers."""
++
++    def __init__(self, delay: float) -> None:
++        self.delay = delay
++        self.lock = threading.Lock()
++        self.next_slot = 0.0
++
++    def wait(self) -> None:
++        if self.delay <= 0:
++            return
++        with self.lock:
++            now = time.monotonic()
++            self.next_slot = max(now, self.next_slot) + self.delay
++            sleep_for = self.next_slot - now
++        if sleep_for > 0:
++            time.sleep(sleep_for)
++
++
++RATE_LIMITER = RateLimiter(REQUEST_DELAY)
++
++# The field that IS the answer: a URL when the locale has art for this printing,
++# `null` when it does not. Named per locale so adding a locale is an explicit
++# edit here rather than a silent wrong-field read.
++AVAILABILITY_FIELD = {"zhs": "zhs_image_url"}
++
++
++def api_base() -> str:
++    return SOURCE_URL.rstrip("/")
++
++
++def fetch_page(set_code: str, page: int) -> dict:
++    """One page of one set's printings. Raises on an unrecoverable failure."""
++    query = urllib.parse.urlencode(
++        {
++            "q": f"set:{set_code}",
++            "view": 1,
++            "page_size": PAGE_SIZE,
++            "page": page,
++            # See the module docstring: both are load-bearing.
++            "unique": "scryfall_id",
++            "include_extras": "true",
++        }
++    )
++    request = urllib.request.Request(
++        f"{api_base()}/result?{query}", headers={"User-Agent": USER_AGENT}
++    )
++    last: Exception | None = None
++    for attempt in range(RETRIES):
++        RATE_LIMITER.wait()
++        try:
++            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
++                return json.load(response)
++        except urllib.error.HTTPError as error:
++            # A 404 means this set has no index entry — an answer, not a retry.
++            if error.code == 404:
++                return {"items": [], "total_pages": 0, "count": 0}
++            last = error
++            # 429 is pacing, not failure: back off harder than a transient error.
++            # Jittered so the workers do not all return at the same instant and
++            # recreate the burst that caused it.
++            if error.code == 429:
++                time.sleep(RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1))
++                continue
++        except Exception as error:  # noqa: BLE001 - network layer, retried below
++            last = error
++        if attempt < RETRIES - 1:
++            time.sleep(1 + attempt)
++    raise RuntimeError(f"{set_code} page {page}: {last}")
++
++
++def collect_set(set_code: str, field: str) -> tuple[dict[str, bool], int]:
++    """Every printing in one set -> {scryfall_id: has_art}, plus pages fetched."""
++    result: dict[str, bool] = {}
++    page = 1
++    pages = 1
++    while page <= pages:
++        body = fetch_page(set_code, page)
++        for item in body.get("items") or []:
++            printing_id = item.get("id") or item.get("scryfall_id")
++            if printing_id:
++                result[printing_id] = bool(item.get(field))
++        # The endpoint clamps an out-of-range page to the last one, so trusting a
++        # hard-coded page count would loop forever; take it from the response.
++        pages = int(body.get("total_pages") or 0)
++        if pages <= 0:
++            break
++        page += 1
++    return result, page - 1
++
++
++def main() -> int:
++    field = AVAILABILITY_FIELD.get(LANG_CODE)
++    if field is None:
++        print(
++            f"ERROR: no availability field known for derived locale '{LANG_CODE}'.",
++            file=sys.stderr,
++        )
++        print(
++            "  Add it to AVAILABILITY_FIELD in this script.",
++            file=sys.stderr,
++        )
++        return 2
++
++    with open(IDS_FILE, encoding="utf-8") as handle:
++        expected = {line.strip() for line in handle if line.strip()}
++    if not expected:
++        print("ERROR: no printing ids to resolve.", file=sys.stderr)
++        return 1
++
++    with open(SET_CODES_FILE, encoding="utf-8") as handle:
++        set_codes = [line.strip() for line in handle if line.strip()]
++    if not set_codes:
++        print("ERROR: no set codes to query.", file=sys.stderr)
++        return 1
++
++    print(
++        f"Querying {len(set_codes)} set(s) at {api_base()}/result "
++        f"(page_size={PAGE_SIZE}) ..."
++    )
++    started = time.time()
++    observed: dict[str, bool] = {}
++    pages_fetched = 0
++    failures: list[str] = []
++
++    def work(set_code: str):
++        try:
++            return set_code, collect_set(set_code, field), None
++        except Exception as error:  # noqa: BLE001 - reported, not swallowed
++            return set_code, ({}, 0), error
++
++    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
++        for done, (set_code, (printings, pages), error) in enumerate(
++            pool.map(work, set_codes), start=1
++        ):
++            if error is not None:
++                failures.append(f"{set_code}: {error}")
++            else:
++                observed.update(printings)
++                pages_fetched += pages
++            if done % 10 == 0 or done == len(set_codes):
++                print(
++                    f"  {done}/{len(set_codes)} sets "
++                    f"({len(observed)} printings, {time.time() - started:.0f}s)",
++                    flush=True,
++                )
++
++    # Coverage is the correctness check that distinguishes "the index has no art"
++    # from "we never asked about this printing". Without it a set that failed or
++    # was missing from SET_CODES_FILE would look like a set with no localized art,
++    # and the client would silently stop preferring art that does exist.
++    missing = expected - observed.keys()
++    if missing:
++        print(
++            f"ERROR: {len(missing)} of {len(expected)} expected printings were "
++            "never returned by the index.",
++            file=sys.stderr,
++        )
++        for printing_id in sorted(missing)[:5]:
++            print(f"    {printing_id}", file=sys.stderr)
++        if failures:
++            print("  set failures:", file=sys.stderr)
++            for failure in failures[:5]:
++                print(f"    {failure}", file=sys.stderr)
++        print(
++            "  Refusing to write a sidecar that would treat unqueried printings "
++            "as having no art.",
++            file=sys.stderr,
++        )
++        return 1
++
++    available = sorted(printing_id for printing_id, has in observed.items() if has)
++    document = {
++        "schema_version": 1,
++        "language": LANG_CODE,
++        "algorithm": "index-api-art-availability-v1",
++        "scope": SCOPE or "all",
++        "source": f"{api_base()}/result",
++        "note": (
++            "English Scryfall printing ids this locale's index serves art for, "
++            "read from the index's own per-printing field "
++            f"({field}). See scripts/gen-derived-art-availability.sh."
++        ),
++        "ids": available,
++    }
++    with open(OUTPUT, "w", encoding="utf-8") as handle:
++        json.dump(document, handle, ensure_ascii=False, separators=(",", ":"))
++
++    size_kb = os.path.getsize(OUTPUT) // 1024
++    total = len(expected)
++    print(
++        f"Wrote {OUTPUT} ({size_kb} KB, {len(available)} ids, "
++        f"{len(available) * 100 // total}% of {total} printings; "
++        f"{pages_fetched} request(s) in {time.time() - started:.0f}s)"
++    )
++    if failures:
++        print(
++            f"  WARNING: {len(failures)} set(s) failed but their printings were "
++            "covered by another set's response.",
++            file=sys.stderr,
++        )
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())

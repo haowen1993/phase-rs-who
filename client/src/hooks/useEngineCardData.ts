@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  normalizeRulingText,
   type CardRuling,
   ensureCardLocale,
 } from "../services/engineRuntime";
@@ -178,6 +179,11 @@ export function useCardParseDetails(cardName: string | null): ParsedItem[] | nul
  * attached to the front face only).
  */
 export function useCardRulings(cardName: string | null): CardRuling[] {
+  // Card text and card rulings follow the same preference; a player reading
+  // Chinese cards is asking to read the rulings in Chinese too.
+  const language = usePreferencesStore((s) =>
+    resolveCardTextLanguage(s.language, s.cardTextLanguage),
+  );
   const [rulings, setRulings] = useState<CardRuling[]>([]);
 
   useEffect(() => {
@@ -185,21 +191,37 @@ export function useCardRulings(cardName: string | null): CardRuling[] {
       setRulings([]);
       return;
     }
-
     let cancelled = false;
 
-    getSharedAdapter().getCardRulings(cardName)
-      .then((result) => {
+    void (async () => {
+      try {
+        const result =
+          ((await getSharedAdapter().getCardRulings(cardName)) as CardRuling[] | null) ?? [];
         if (cancelled) return;
-        setRulings((result as CardRuling[] | null) ?? []);
-      })
-      .catch(() => {
+        if (result.length === 0 || language === "en") {
+          setRulings(result);
+          return;
+        }
+        const localeMap = await ensureCardLocale(language);
         if (cancelled) return;
-        setRulings([]);
-      });
+        // Per-field fallback, exactly like the name/oracle-text overlay: a ruling
+        // with no translation keeps its English text rather than disappearing.
+        const translations = localeMap.get(cardName.toLowerCase())?.rulings;
+        setRulings(
+          translations
+            ? result.map((ruling) => ({
+                ...ruling,
+                text: translations[normalizeRulingText(ruling.text)] ?? ruling.text,
+              }))
+            : result,
+        );
+      } catch {
+        if (!cancelled) setRulings([]);
+      }
+    })();
 
     return () => { cancelled = true; };
-  }, [cardName]);
+  }, [cardName, language]);
 
   return rulings;
 }

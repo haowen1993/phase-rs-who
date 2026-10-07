@@ -102,6 +102,41 @@ export interface LocalizedFace {
   name?: string;
   oracle_text?: string;
   type_line?: string;
+  /** Rulings this locale has a translation for, keyed by the NORMALIZED English
+   *  text of the ruling they translate (see `normalizeRulingText`).
+   *
+   * Keyed rather than a positional array because the engine owns its own ruling
+   * list and any one of them may be untranslated: an array would slide out of
+   * correspondence and put the wrong Chinese sentence under a ruling. A keyed
+   * lookup either matches or falls back to English.
+   *
+   * Only `zhs` carries this today — the other locales get their text from MTGJSON
+   * `foreignData`, which has no translated rulings. */
+  rulings?: Record<string, string>;
+}
+
+/**
+ * Fold the typography differences between MTGJSON's and Scryfall's copies of the
+ * same ruling, so the sidecar's key matches the text the engine hands back.
+ *
+ * The two sources disagree on curly vs straight quotes, em dash vs `--`, and the
+ * ellipsis character vs three dots, plus incidental whitespace. Folding those
+ * finds 99% of rulings where a raw comparison finds 89% (measured over the WHO
+ * pool). MUST stay identical to `normalizeForMatch` in
+ * `scripts/gen-zhs-card-text.mjs`, which keys the sidecar with it.
+ */
+export function normalizeRulingText(text: string): string {
+  return text
+    .replaceAll("\u2019", "'")
+    .replaceAll("\u2018", "'")
+    .replaceAll("\u201c", '"')
+    .replaceAll("\u201d", '"')
+    .replaceAll("\u2014", "--")
+    .replaceAll("\u2013", "-")
+    .replaceAll("\u2026", "...")
+    .trim()
+    .split(/\s+/)
+    .join(" ");
 }
 
 const cardLocalePromises = new Map<string, Promise<Map<string, LocalizedFace>>>();

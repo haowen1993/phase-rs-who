@@ -12,10 +12,15 @@
 // join needs no engine code, and running it costs seconds instead of a
 // `tool`-profile engine rebuild.
 //
+// The sidecar also carries card RULINGS. The engine serves those from MTGJSON in
+// English and exposes no id for them, so they are joined by NORMALIZED English
+// text rather than by key — see `normalizeForMatch`.
+//
 // Usage:
 //   node scripts/gen-zhs-card-text.mjs                    # pinned release
 //   node scripts/gen-zhs-card-text.mjs --release data-2026-10-04
 //   node scripts/gen-zhs-card-text.mjs --all-stages       # include stage 0
+//   node scripts/gen-zhs-card-text.mjs --skip-rulings     # text fields only
 //   node scripts/gen-zhs-card-text.mjs --dry-run          # report, write nothing
 //
 // Output: client/public/card-data.zhs.json
@@ -43,10 +48,12 @@ const option = (name, fallback) => {
 const release = option("release", "data-2026-10-04");
 const dryRun = flag("dry-run");
 const allStages = flag("all-stages");
+const skipRulings = flag("skip-rulings");
 const sourceDir = resolve(repoRoot, option("source-dir", ".zhs-cache"));
 const outPath = resolve(repoRoot, "client/public/card-data.zhs.json");
 const releaseDir = join(sourceDir, release);
 const oraclePath = join(releaseDir, "zhs_oracle.json");
+const rulingPath = join(releaseDir, "zhs_ruling.json");
 
 const TARBALL = `magic-cards-zhs-${release}.tar.gz`;
 const URL = `https://github.com/HeliumOctahelide/magic-cards-zhs/releases/download/${release}/${TARBALL}`;
@@ -102,6 +109,32 @@ const expandCardName = (text, localizedName, englishName) =>
  * `\\n`, so this cannot damage a value that was already correct. */
 const unescapeNewlines = (text) =>
   typeof text === "string" ? text.replaceAll("\\\\n", "\n") : text ?? undefined;
+
+/** Fold the punctuation differences between the two sources.
+ *
+ * The engine's English ruling text comes from MTGJSON and the dataset's from
+ * Scryfall, and they disagree on typography — curly vs straight quotes, em dash
+ * vs `--`, the ellipsis character vs three dots — plus incidental whitespace.
+ * Matching raw text finds 89% of rulings; folding those classes first finds 99%
+ * (measured over the full 79,668-ruling WHO pool: 71,694 exact, +7,486 folded).
+ *
+ * Applied to BOTH sides, and the sidecar is keyed by the folded form so the
+ * lookup at runtime is a single call rather than a scan. Folding cannot merge two
+ * distinct rulings: it only rewrites punctuation that carries no meaning here.
+ */
+function normalizeForMatch(text) {
+  return String(text ?? "")
+    .replaceAll("\u2019", "'")
+    .replaceAll("\u2018", "'")
+    .replaceAll("\u201c", '"')
+    .replaceAll("\u201d", '"')
+    .replaceAll("\u2014", "--")
+    .replaceAll("\u2013", "-")
+    .replaceAll("\u2026", "...")
+    .trim()
+    .split(/\s+/)
+    .join(" ");
+}
 
 /** Pick the best of the several records that share one `oracle_id`.
  *
@@ -170,6 +203,81 @@ async function loadPool() {
   return byOracle;
 }
 
+/** Every face the sidecar should carry an entry for: `name -> english ruling
+ *  texts`. Read from `card-data.json` because the engine's rulings live there and
+ *  only there — and because a card can have rulings without having a Chinese
+ *  Oracle record, which is the majority of them. */
+async function loadPoolRulings() {
+  const raw = await readFile(resolve(repoRoot, "client/public/card-data.json"), "utf8");
+  const pool = JSON.parse(raw);
+  const byName = new Map();
+  for (const [name, face] of Object.entries(pool)) {
+    if (name.includes("//")) continue;
+    const rulings = (face.rulings ?? [])
+      .map((ruling) => (ruling?.text ?? "").trim())
+      .filter(Boolean);
+    byName.set(name, rulings);
+  }
+  return byName;
+}
+
+/** English ruling text (normalized) -> Chinese, from the dataset's ruling export.
+ *
+ * Keyed by `normalizeForMatch(comment)` because that is exactly what the runtime
+ * lookup can compute: the engine exposes a ruling as `{date, text}` with no id, so
+ * the ONLY join available is the English sentence itself.
+ *
+ * Optional file: a card-text-only run logs and continues rather than failing, so
+ * the text half of this sidecar never depends on a second download.
+ */
+async function loadRulingTranslations() {
+  if (skipRulings) return null;
+  if (!existsSync(rulingPath)) {
+    console.log(`rulings: ${rulingPath} not present — writing text fields only`);
+    console.log("  fetch zhs_ruling.json from the same release to include rulings.");
+    return null;
+  }
+  const translations = new Map();
+  const stats = { lines: 0, malformed: 0, belowStage: 0, noTranslation: 0 };
+  const rl = createInterface({
+    input: (await import("node:fs")).createReadStream(rulingPath),
+    crlfDelay: Infinity,
+  });
+  for await (const rawLine of rl) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    stats.lines += 1;
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      stats.malformed += 1;
+      try {
+        record = JSON.parse(repairLine(line));
+      } catch {
+        continue;
+      }
+    }
+    const comment = (record.comment ?? "").trim();
+    const translation = (record.translation ?? "").trim();
+    if (!comment || !translation) {
+      stats.noTranslation += 1;
+      continue;
+    }
+    if ((record.stage ?? -1) < MIN_STAGE) {
+      stats.belowStage += 1;
+      continue;
+    }
+    translations.set(normalizeForMatch(comment), translation);
+  }
+  console.log(
+    `rulings: ${translations.size} translations ` +
+      `(${stats.lines} records, ${stats.malformed} malformed, ` +
+      `${stats.belowStage} below stage ${MIN_STAGE}, ${stats.noTranslation} untranslated)`,
+  );
+  return translations;
+}
+
 async function main() {
   await ensureSource();
   const byOracle = await loadPool();
@@ -220,19 +328,55 @@ async function main() {
     best.set(oracleId, previous ? betterRecord(previous, record) : record);
   }
 
+  const rulingTranslations = await loadRulingTranslations();
+
+  // Built over the WHOLE pool rather than over `best` alone: the two datasets
+  // cover different cards (text is per-Oracle-record, rulings are per-card), and
+  // most cards with rulings have no Chinese Oracle record at all. Iterating only
+  // the text winners would silently drop those rulings.
+  const poolRulings = await loadPoolRulings();
+  const localizedByOracle = new Map();
+  for (const [oracleId, record] of best) localizedByOracle.set(byOracle.get(oracleId), record);
+
   const sidecar = {};
-  for (const [oracleId, record] of best) {
-    const englishName = byOracle.get(oracleId);
-    const localizedName = record.translated_name ?? undefined;
-    sidecar[englishName] = {
-      name: localizedName,
-      oracle_text: expandCardName(
+  let cardsWithText = 0;
+  let cardsWithRulings = 0;
+  let rulingsTotal = 0;
+  for (const [englishName, rulings] of poolRulings) {
+    const record = localizedByOracle.get(englishName);
+    const localizedName = record?.translated_name ?? undefined;
+    const entry = {};
+    if (record) {
+      cardsWithText += 1;
+      entry.name = localizedName;
+      entry.oracle_text = expandCardName(
         unescapeNewlines(record.translated_text),
         localizedName,
         englishName,
-      ),
-      type_line: record.translated_type ?? undefined,
-    };
+      );
+      entry.type_line = record.translated_type ?? undefined;
+    }
+    if (rulingTranslations) {
+      // Keyed by the NORMALIZED ENGLISH TEXT, not a positional array. The engine
+      // returns its own ruling list and a translation can be missing for any one
+      // of them, so an array would slide out of correspondence the moment a
+      // ruling shifted or was untranslated — silently attaching the wrong Chinese
+      // sentence to a ruling. Keyed, a runtime lookup either finds the sentence
+      // that matches or falls back to English.
+      const translated = {};
+      for (const text of rulings) {
+        const zh = rulingTranslations.get(normalizeForMatch(text));
+        if (zh) {
+          translated[normalizeForMatch(text)] = zh;
+          rulingsTotal += 1;
+        }
+      }
+      if (Object.keys(translated).length) {
+        entry.rulings = translated;
+        cardsWithRulings += 1;
+      }
+    }
+    if (Object.keys(entry).length) sidecar[englishName] = entry;
   }
 
   const covered = Object.keys(sidecar).length;
@@ -241,6 +385,10 @@ async function main() {
   console.log(`dataset: ${stats.lines} lines, ${stats.malformed} malformed (repaired)`);
   console.log(`  skipped: ${stats.belowStage} below stage ${MIN_STAGE}, ` +
     `${stats.noChinese} without Chinese, ${stats.notInPool} not in this card pool`);
+  if (rulingTranslations) {
+    console.log(`  rulings: ${rulingsTotal} translations across ${cardsWithRulings} cards`);
+    console.log(`  text:    ${cardsWithText} cards`);
+  }
   console.log(`sidecar: ${covered} / ${poolSize} pool faces (${((covered / poolSize) * 100).toFixed(1)}%)`);
 
   if (dryRun) {

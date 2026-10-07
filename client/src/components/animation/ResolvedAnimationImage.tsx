@@ -78,6 +78,18 @@ export function ResolvedAnimationImage({
   });
   const settledRef = useRef(false);
 
+  // Both of these are called BEFORE the `!src` early return below, and they must
+  // stay there. A hook after a conditional return changes the hook count between
+  // renders — `src` is null while the art resolves — which React reports as an
+  // error and which took the whole app to its error boundary when this was
+  // written the other way round. `useCanvasImageCors` accepts null for exactly
+  // this reason.
+  const wantsCors = Boolean(imageAttributes.crossOrigin);
+  const { crossOrigin: corsValue, onError: retryWithoutCors } = useCanvasImageCors(
+    wantsCors ? src : null,
+  );
+  const { crossOrigin: _declared, ...restAttributes } = imageAttributes;
+
   useEffect(() => {
     if (isLoading || src || settledRef.current) return;
     settledRef.current = true;
@@ -87,14 +99,6 @@ export function ResolvedAnimationImage({
   if (!src) return fallback;
 
   const capturedSrc = src;
-  // These layers upload the image into WebGL, which needs a CORS-clean load; a
-  // host that cannot answer one gets a single no-cors retry so the art still
-  // appears. See `useCanvasImageCors`.
-  const wantsCors = Boolean(imageAttributes.crossOrigin);
-  const { crossOrigin: corsValue, onError: retryWithoutCors } = useCanvasImageCors(
-    wantsCors ? capturedSrc : null,
-  );
-  const { crossOrigin: _declared, ...restAttributes } = imageAttributes;
   return (
     <img
       {...restAttributes}

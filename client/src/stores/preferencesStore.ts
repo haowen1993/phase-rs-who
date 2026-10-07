@@ -1231,6 +1231,13 @@ export const usePreferencesStore = create<PreferencesState & PreferencesActions>
             : "right",
         };
       },
+      // Card art and card text language are no longer pickers, so they must not
+      // survive in storage: a value written while they WERE pickers would keep
+      // overriding the interface language forever, with nothing on screen able to
+      // change it. Dropping them from `partialize` is what retires the stored
+      // values — "follow the interface" is then structural rather than a default
+      // that stale state can defeat.
+      partialize: ({ artLanguage: _art, cardTextLanguage: _text, ...rest }) => rest,
     },
   ),
 );

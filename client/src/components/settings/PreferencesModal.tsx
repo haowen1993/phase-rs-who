@@ -36,7 +36,6 @@ import {
 } from "../../animation/types.ts";
 import type {
   ArtChainEntry,
-  ArtLanguagePreference,
   CardPreviewMode,
   CardSizePreference,
   CommandZoneDisplay,
@@ -46,12 +45,6 @@ import type {
   ZoneCollapseMode,
 } from "../../stores/preferencesStore.ts";
 import type { SupportedLng } from "../../i18n/resources.ts";
-import { ART_LANGUAGES, type ArtLanguage } from "../../services/cardArtLocale.ts";
-import {
-  CARD_TEXT_LANGUAGES,
-  type CardTextLanguage,
-  type CardTextLanguagePreference,
-} from "../../services/cardTextLocale.ts";
 import { LanguageFlag } from "../ui/LanguageFlag.tsx";
 import { BATTLEFIELDS } from "../board/battlefields.ts";
 import { PLAIN_BACKGROUNDS } from "../board/plainBackgrounds.ts";
@@ -83,6 +76,13 @@ interface PreferencesModalProps {
 /** Locale options for the language selector. Labels are autonyms (each language's
  *  own name) and are intentionally NOT translated. */
 const LANGUAGE_OPTIONS: { value: SupportedLng; label: string }[] = [
+  // Chinese leads the list in this fork. Ordering is presentation only — it does
+  // not change what any value resolves to.
+  //
+  // Labelled `中文` rather than `简体中文`: the app ships one Chinese, simplified,
+  // and every `zh*` browser tag maps to it, so naming the script would imply an
+  // alternative that does not exist.
+  { value: "zhs", label: "中文" },
   { value: "en", label: "English" },
   { value: "es", label: "Español" },
   { value: "fr", label: "Français" },
@@ -91,46 +91,8 @@ const LANGUAGE_OPTIONS: { value: SupportedLng; label: string }[] = [
   { value: "pt", label: "Português" },
   { value: "pl", label: "Polski" },
   { value: "ja", label: "日本語" },
-  // Simplified Chinese ships a UI catalog as well as card art, which is what
-  // makes `artLanguage: "auto"` able to reach Chinese art: the player chooses
-  // Chinese here and both follow. Without this entry the art picker could select
-  // Chinese while the interface had no way to, so `auto` would never resolve to it.
-  { value: "zhs", label: "简体中文" },
 ];
 
-/**
- * Card-art options, sourced from `ART_LANGUAGES` so the picker and the resolver
- * can never drift. The two sets differ in BOTH directions: Polish has a UI and no
- * localized art, and the derived locales can offer art the interface does not
- * translate. `zhs` is in both today, which is what lets `"auto"` reach Chinese.
- *
- * Labels are autonyms and intentionally NOT translated, matching the language
- * picker above — a player hunting for their own language must be able to read
- * the option regardless of which language the UI currently renders in. The
- * "follow the UI" entry is the one exception: it names a relationship rather
- * than a language, so it goes through `t()`.
- */
-const ART_LANGUAGE_VALUES: ArtLanguagePreference[] = ["auto", ...ART_LANGUAGES];
-const ART_LANGUAGE_LABELS: Record<ArtLanguage, string> = {
-  en: "English",
-  es: "Español",
-  fr: "Français",
-  de: "Deutsch",
-  it: "Italiano",
-  pt: "Português",
-  pl: "Polski",
-  ja: "日本語",
-  zhs: "简体中文",
-};
-
-const CARD_TEXT_LANGUAGE_VALUES: CardTextLanguagePreference[] = [
-  "auto",
-  ...CARD_TEXT_LANGUAGES,
-];
-/** Card-TEXT languages are labelled with the same endonyms as art languages. The
- *  two sets happen to coincide today — both exclude `pl`, which has no localized
- *  card data — but they are separate vocabularies; see `cardTextLocale.ts`. */
-const CARD_TEXT_LANGUAGE_LABELS: Record<CardTextLanguage, string> = ART_LANGUAGE_LABELS;
 
 const CARD_SIZES: CardSizePreference[] = ["small", "medium", "large"];
 const COMMAND_ZONE_DISPLAYS: CommandZoneDisplay[] = ["auto", "inline", "compact"];
@@ -228,10 +190,6 @@ export function PreferencesModal({
 
   const language = usePreferencesStore((s) => s.language);
   const setLanguage = usePreferencesStore((s) => s.setLanguage);
-  const artLanguage = usePreferencesStore((s) => s.artLanguage);
-  const cardTextLanguage = usePreferencesStore((s) => s.cardTextLanguage);
-  const setArtLanguage = usePreferencesStore((s) => s.setArtLanguage);
-  const setCardTextLanguage = usePreferencesStore((s) => s.setCardTextLanguage);
   const cardSize = usePreferencesStore((s) => s.cardSize);
   const commandZoneDisplay = usePreferencesStore((s) => s.commandZoneDisplay);
   const collapseLands = usePreferencesStore((s) => s.collapseLands);
@@ -446,30 +404,6 @@ export function PreferencesModal({
                         );
                       })}
                     </div>
-                  </SettingGroup>
-
-                  <SettingGroup label={t("gameplay.artLanguage")}>
-                    <SegmentedControl
-                      options={ART_LANGUAGE_VALUES}
-                      value={artLanguage}
-                      onChange={setArtLanguage}
-                      renderLabel={(opt) =>
-                        opt === "auto" ? t("gameplay.artLanguageAuto") : ART_LANGUAGE_LABELS[opt]
-                      }
-                    />
-                  </SettingGroup>
-
-                  <SettingGroup label={t("gameplay.cardTextLanguage")}>
-                    <SegmentedControl
-                      options={CARD_TEXT_LANGUAGE_VALUES}
-                      value={cardTextLanguage}
-                      onChange={setCardTextLanguage}
-                      renderLabel={(opt) =>
-                        opt === "auto"
-                          ? t("gameplay.cardTextLanguageAuto")
-                          : CARD_TEXT_LANGUAGE_LABELS[opt]
-                      }
-                    />
                   </SettingGroup>
 
                   <SettingGroup label={t("gameplay.cardSize")}>

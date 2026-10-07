@@ -111,6 +111,30 @@ function FlagJA({ className }: { className?: string }) {
   );
 }
 
+function FlagZHS({ className }: { className?: string }) {
+  // Simplified Five-Star Red Flag. Four small stars sit in the canton, each
+  // rotated toward the large one; at chip size the rotation reads as a star, so
+  // they are drawn upright with the correct offsets rather than transformed.
+  const star = (cx: number, cy: number, r: number, key: string) => {
+    const points = Array.from({ length: 10 }, (_, i) => {
+      const radius = i % 2 === 0 ? r : r * 0.382;
+      const angle = (Math.PI / 5) * i - Math.PI / 2;
+      return `${cx + radius * Math.cos(angle)},${cy + radius * Math.sin(angle)}`;
+    }).join(" ");
+    return <polygon key={key} points={points} fill="#FFDE00" />;
+  };
+  return (
+    <svg viewBox={VIEW_BOX} className={className} aria-hidden="true">
+      <rect width="60" height="40" fill="#DE2910" />
+      {star(10, 10, 6, "big")}
+      {star(19, 4, 2, "s1")}
+      {star(23, 8, 2, "s2")}
+      {star(23, 14, 2, "s3")}
+      {star(19, 18, 2, "s4")}
+    </svg>
+  );
+}
+
 export function LanguageFlag({ lng, className }: { lng: SupportedLng; className?: string }) {
   // Keep in sync with SupportedLng.
   switch (lng) {
@@ -130,5 +154,7 @@ export function LanguageFlag({ lng, className }: { lng: SupportedLng; className?
       return <FlagPL className={className} />;
     case "ja":
       return <FlagJA className={className} />;
+    case "zhs":
+      return <FlagZHS className={className} />;
   }
 }

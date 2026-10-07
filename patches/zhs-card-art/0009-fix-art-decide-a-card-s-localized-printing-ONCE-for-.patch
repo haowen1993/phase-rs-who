@@ -1,7 +1,7 @@
-From a8c57390b7a2eedcd9a4c1e104a9b878b03c446c Mon Sep 17 00:00:00 2001
+From e012a346c905f83d12612d1178d205aac9e0ab96 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 15:51:44 +0800
-Subject: [PATCH 09/10] fix(art): decide a card's localized printing ONCE, for
+Subject: [PATCH 09/11] fix(art): decide a card's localized printing ONCE, for
  every zone
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

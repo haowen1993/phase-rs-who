@@ -1,7 +1,7 @@
-From e693736203fc77ee6ee14291072a12bdcf7c5f6e Mon Sep 17 00:00:00 2001
+From e395d99dbe0cbf30990b7ef369a8c9eae1fd7b4b Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 00:29:04 +0800
-Subject: [PATCH 4/9] fix(art): preserve the derived rung's size instead of
+Subject: [PATCH 04/11] fix(art): preserve the derived rung's size instead of
  re-parsing it
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -1,7 +1,7 @@
-From 823f6d001a56e647b34589123cbfd2aa6e4cf63f Mon Sep 17 00:00:00 2001
+From 4411fbe314cd13a51daee6192bc77c03085e5197 Mon Sep 17 00:00:00 2001
 From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
 Date: Wed, 7 Oct 2026 16:06:19 +0800
-Subject: [PATCH 10/10] refactor(art): rewrite to the CDN unconditionally and
+Subject: [PATCH 10/11] refactor(art): rewrite to the CDN unconditionally and
  let its 404 pick the rung
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

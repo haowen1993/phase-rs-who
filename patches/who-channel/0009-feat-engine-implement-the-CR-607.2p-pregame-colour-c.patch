@@ -1,0 +1,900 @@
+From ef4658f3b2f0b6e42d999ae927b689837c417fd9 Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Wed, 7 Oct 2026 09:15:32 +0800
+Subject: [PATCH 9/9] feat(engine): implement the CR 607.2p pregame colour
+ choice for a commander
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+"Impossible Girl — If Clara Oswald is your commander, choose a color before the
+game begins. Clara Oswald is the chosen color." (Clara Oswald) lowers to a LINKED
+pair per CR 607.2p: a `BeginGame` ability that asks, and a characteristic-defining
+static that reads the answer. Measured over the whole corpus (Scryfall
+`oracle:"choose a color before the game begins"`, `unique=cards`) the class is
+exactly three cards — Clara Oswald, Faceless One, The Prismatic Piper — and all
+three word it identically apart from the name, so the recognizer covers the class
+rather than the card.
+
+Four defects had to be fixed, three of them general:
+
+  * The card-data setter is not a zone. CR 604.3 makes a CDA function in every
+    zone, but `effect_candidate_ids` resolved a named-object filter against the
+    FILTER's scan zones, which default to the battlefield. An admitted `SelfRef`
+    CDA on a card in the command zone therefore had an EMPTY affected set and was
+    dropped outright — not evaluated false, never executed. Fixed for the
+    `named == source_id` case only: a `SpecificObject` naming some OTHER object
+    keeps the scan-zone gate, because that class is delivered by the off-zone
+    authority (pinned by
+    `identity_shortcut_declines_for_a_predicate_and_spans_non_battlefield_zones`,
+    whose graveyard-bound cross-object grant must not start landing here).
+
+  * The pregame drain scanned only the opening hand. CR 903.6 puts a commander in
+    the command zone before the first turn, so a commander's own pregame ability
+    could never be found. `queue_begin_game_abilities` now scans hand then command
+    zone, per player.
+
+  * `StaticCondition` had no way to say "the source is a commander". Added
+    `SourceIsCommander` (CR 903.3: the designation is an attribute of the card and
+    holds in every zone) and wired all 20 exhaustive-match sites.
+
+  * The chosen colour needs a store that survives a zone change. CR 607.2p says
+    the linked reference "continues to refer to that choice as the object changes
+    zones", but `chosen_attributes` is cleared by `reset_for_battlefield_entry`
+    (CR 400.7) on every battlefield entry — a commander chosen in the command zone
+    would lose its colour the moment it resolved. Added
+    `GameObject::commander_color_choice`, written by the `Choose` resolver during
+    the pregame drain and read FIRST by `GameObject::chosen_color`, so the whole
+    chosen-colour family (`AddChosenColor`, `IsChosenColor`,
+    `HexproofFrom`/`Protection(ChosenColor)`) serves this card unchanged.
+
+KNOWN GAP, deliberately deferred and recorded rather than silently accepted —
+CR 903.4b: the chosen colour "applies during deck construction ... That choice
+affects the commander's color identity." Deck validation does not know the choice,
+so with Clara as a commander a custom deck is not colour-identity-checked against
+it (CR 903.5c/903.5d). Reach is one scenario this fork's four precons never take:
+Paradox Power's commanders are The Thirteenth Doctor and Yasmin Khan, and Clara
+sits in the 99 where CR 903.3d makes her ability's commander gate FALSE — the
+whole paragraph is inert and the engine already handles her correctly. Closing the
+gap needs deck-side colour selection (a `DeckCompatibilityRequest` /
+`PlayerDeckList` field plus a deck-builder picker) and is its own unit of work.
+
+Unrelated pre-existing gap found while tracing the above, not fixed here:
+`deck_validation::card_color_identity`'s fallback reads only the mana cost and
+`color_override`, never mana symbols in rules text (CR 903.4), and never a CDA.
+That is masked in this fork because the data pipeline pre-fills `color_identity`
+from Scryfall for 281 of 362 WHO cards and the fallback only runs for the other 81.
+---
+ crates/engine/src/game/ability_rw.rs          |   2 +
+ crates/engine/src/game/ability_scan.rs        |   2 +
+ crates/engine/src/game/casting.rs             |   1 +
+ crates/engine/src/game/coverage.rs            |   4 +
+ crates/engine/src/game/effects/choose.rs      |  30 +++
+ crates/engine/src/game/game_object.rs         |  29 +++
+ crates/engine/src/game/layers.rs              |  56 +++-
+ crates/engine/src/game/mulligan.rs            | 239 +++++++++++++++++-
+ crates/engine/src/game/quantity.rs            |   1 +
+ crates/engine/src/parser/oracle.rs            | 114 +++++++++
+ crates/engine/src/parser/oracle_condition.rs  |   3 +
+ .../src/parser/oracle_effect/conditions.rs    |   3 +
+ .../parser/oracle_static/static_helpers.rs    |   1 +
+ crates/engine/src/parser/oracle_trigger.rs    |   3 +
+ crates/engine/src/types/ability.rs            |  25 ++
+ 15 files changed, 505 insertions(+), 8 deletions(-)
+
+diff --git a/crates/engine/src/game/ability_rw.rs b/crates/engine/src/game/ability_rw.rs
+index b921d0e8c0..ef2ece7cb0 100644
+--- a/crates/engine/src/game/ability_rw.rs
++++ b/crates/engine/src/game/ability_rw.rs
+@@ -2080,6 +2080,7 @@ fn legacy_static_condition(x: &StaticCondition) -> bool {
+         | StaticCondition::SourceIsBlocking
+         | StaticCondition::SourceIsBlocked
+         | StaticCondition::SourceEnteredThisTurn
++        | StaticCondition::SourceIsCommander
+         | StaticCondition::SourceHasDealtDamage
+         | StaticCondition::SourceIsSaddled
+         | StaticCondition::SourceIsEquipped
+@@ -7032,6 +7033,7 @@ fn rw_static_condition(x: &StaticCondition) -> RwProfile {
+         | StaticCondition::SourceIsAttacking
+         | StaticCondition::SourceIsBlocking
+         | StaticCondition::SourceIsBlocked
++        | StaticCondition::SourceIsCommander
+         | StaticCondition::SourceEnteredThisTurn
+         | StaticCondition::SourceHasDealtDamage
+         | StaticCondition::SourceIsSaddled
+diff --git a/crates/engine/src/game/ability_scan.rs b/crates/engine/src/game/ability_scan.rs
+index 0247cd04e6..56b486074d 100644
+--- a/crates/engine/src/game/ability_scan.rs
++++ b/crates/engine/src/game/ability_scan.rs
+@@ -4302,6 +4302,8 @@ fn scan_static_condition(x: &StaticCondition, mode: ScanMode) -> Axes {
+         StaticCondition::SourceIsAttacking => Axes::NONE,
+         StaticCondition::SourceIsBlocking => Axes::NONE,
+         StaticCondition::SourceIsBlocked => Axes::NONE,
++        // CR 903.3: commander designation is card identity, not board state.
++        StaticCondition::SourceIsCommander => Axes::NONE,
+         // CR 725.1: see the `TriggerCondition::IsMonarch` arm above — the
+         // subject scope is classified through the shared `PlayerScope` walker.
+         StaticCondition::IsMonarch { player } => scan_player_scope(player),
+diff --git a/crates/engine/src/game/casting.rs b/crates/engine/src/game/casting.rs
+index 6379bae7bf..9d5ebcd0a9 100644
+--- a/crates/engine/src/game/casting.rs
++++ b/crates/engine/src/game/casting.rs
+@@ -5857,6 +5857,7 @@ fn holder_bound_condition_is_modeled(condition: &StaticCondition) -> bool {
+         | StaticCondition::Unrecognized { .. }
+         | StaticCondition::SharesColorWithMostCommonColorAmongPermanents
+         | StaticCondition::SourceEnteredThisTurn
++        | StaticCondition::SourceIsCommander
+         | StaticCondition::SourceHasDealtDamage
+         | StaticCondition::WasCast { .. }
+         | StaticCondition::IsRingBearer
+diff --git a/crates/engine/src/game/coverage.rs b/crates/engine/src/game/coverage.rs
+index 97937779f8..d5679b162a 100644
+--- a/crates/engine/src/game/coverage.rs
++++ b/crates/engine/src/game/coverage.rs
+@@ -5028,6 +5028,7 @@ fn fmt_static_condition(cond: &StaticCondition) -> String {
+         SC::SourceIsAttacking => "source is attacking".into(),
+         SC::SourceIsBlocking => "source is blocking".into(),
+         SC::SourceIsBlocked => "source is blocked".into(),
++        SC::SourceIsCommander => "source is a commander".into(),
+         // CR 725.1 + CR 109.5: see the `TC::IsMonarch` arm above.
+         SC::IsMonarch {
+             player: PlayerScope::Controller,
+@@ -10225,6 +10226,9 @@ fn static_condition_feature(cond: &StaticCondition) -> (&'static str, FeatureSup
+             ("SharesColorWithMostCommonColorAmongPermanents", Handled)
+         }
+         StaticCondition::SourceEnteredThisTurn => ("SourceEnteredThisTurn", Handled),
++        // CR 903.3: evaluated at `layers.rs::evaluate_condition_inner` against
++        // `GameObject::is_commander`; no dependency on a dirty-tracked family.
++        StaticCondition::SourceIsCommander => ("SourceIsCommander", Handled),
+         StaticCondition::SourceHasDealtDamage => ("SourceHasDealtDamage", Handled),
+         StaticCondition::WasCast { .. } => ("WasCast", Handled),
+         StaticCondition::IsRingBearer => ("IsRingBearer", Handled),
+diff --git a/crates/engine/src/game/effects/choose.rs b/crates/engine/src/game/effects/choose.rs
+index 5a696bad94..5078713249 100644
+--- a/crates/engine/src/game/effects/choose.rs
++++ b/crates/engine/src/game/effects/choose.rs
+@@ -282,6 +282,36 @@ pub(crate) fn bind_named_choice(
+         return updated_context;
+     }
+     if let Some(source) = exact_object_source {
++        // CR 607.2p + CR 903.3: A color chosen for a CHARACTERISTIC-DEFINING
++        // ability BEFORE THE GAME BEGINS is a linked-ability choice whose
++        // reference "continues to refer to that choice as the object changes
++        // zones during the game". `chosen_attributes` cannot carry it —
++        // `reset_for_battlefield_entry` clears that list on every battlefield
++        // entry (CR 400.7), and the motivating card is a commander chosen while
++        // it is still in the command zone. Mirror the answer into the object's
++        // dedicated `commander_color_choice`, which `GameObject::chosen_color`
++        // reads first, so the whole chosen-color family resolves against it.
++        //
++        // Gated on the pregame drain (`resolving_begin_game_abilities`) AND on
++        // the chosen object being a commander, so an in-game color choice made
++        // by some other card can never write this field.
++        if state.resolving_begin_game_abilities && matches!(choice_type, ChoiceType::Color { .. }) {
++            let chosen = ChosenAttribute::from_choice(choice_type.clone(), choice);
++            let commander = source
++                .context
++                .as_ref()
++                .map(|context| context.identity.reference.object_id);
++            if let (Some(ChosenAttribute::Color(color)), Some(object_id)) = (chosen, commander) {
++                if let Some(object) = state.objects.get_mut(&object_id) {
++                    if object.is_commander {
++                        object.commander_color_choice = Some(color);
++                        // CR 613.1e: the color is a layer-5 characteristic — re-run
++                        // layers so the continuous effect reading it is applied.
++                        crate::game::layers::mark_layers_full(state);
++                    }
++                }
++            }
++        }
+         // CR 608.2d: A multi-keyword choice (`ChoiceType::Keyword { count > 1 }`,
+         // e.g. Greymond's "choose two abilities from among ...") arrives as one
+         // comma-joined answer ("First Strike, Vigilance"). Split it on ',' and
+diff --git a/crates/engine/src/game/game_object.rs b/crates/engine/src/game/game_object.rs
+index 0362de0881..f3ae0619db 100644
+--- a/crates/engine/src/game/game_object.rs
++++ b/crates/engine/src/game/game_object.rs
+@@ -1282,6 +1282,24 @@ pub struct GameObject {
+     // Commander: whether this object is a commander card
+     #[serde(default, skip_serializing_if = "is_false")]
+     pub is_commander: bool,
++    /// CR 607.2p + CR 903.3: the color a card chose for its own
++    /// characteristic-defining ability BEFORE THE GAME BEGAN ("Impossible Girl —
++    /// If Clara Oswald is your commander, choose a color before the game begins.
++    /// Clara Oswald is the chosen color.").
++    ///
++    /// A dedicated field rather than `ChosenAttribute::Color`, because CR 607.2p
++    /// makes this a LINKED pair whose reference "continues to refer to that
++    /// choice as the object changes zones during the game", while
++    /// `chosen_attributes` is cleared by `reset_for_battlefield_entry` (CR 400.7)
++    /// on every battlefield entry — a commander chosen in the command zone would
++    /// lose its color the moment it resolved onto the battlefield.
++    ///
++    /// Like `is_commander`, this is an attribute of the CARD: set once during the
++    /// pregame procedure and never cleared. `GameObject::chosen_color` reads it
++    /// FIRST, so the whole `AddChosenColor` / `IsChosenColor` / chosen-color
++    /// keyword family resolves against it with no further changes.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub commander_color_choice: Option<ManaColor>,
+     /// Oathbreaker RC: command-zone signature-spell role.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub signature_spell: Option<SignatureSpellState>,
+@@ -1856,6 +1874,7 @@ fn _gameobject_partition_is_total(o: &GameObject) {
+         // synchronously by `push_ability_entry` into the resolving
+         // `ResolvedAbility`'s own `noted_mana_payment` snapshot (§5.2c).
+         mana_spent_to_activate: _,
++        commander_color_choice: _,
+     } = o;
+ }
+ 
+@@ -3018,6 +3037,7 @@ impl GameObject {
+             blocked_abilities: Vec::new(),
+             loyalty_activations_this_turn: 0,
+             is_commander: false,
++            commander_color_choice: None,
+             signature_spell: None,
+             commander_tax: None,
+             is_renowned: false,
+@@ -3706,6 +3726,15 @@ impl GameObject {
+     /// Sibling of `current_chosen_color` (newest) — see that doc for why the
+     /// two accessors read different ends of the same list.
+     pub fn chosen_color(&self) -> Option<ManaColor> {
++        // CR 607.2p: a pregame choice made for a characteristic-defining ability
++        // outranks every in-game one, and is the ONLY reading that survives a
++        // zone change (`chosen_attributes` is cleared per battlefield entry).
++        // Consulting it first means the whole chosen-color family —
++        // `AddChosenColor`, `FilterProp::IsChosenColor`, `HexproofFrom`/
++        // `Protection(ChosenColor)` — serves this card with no further change.
++        if let Some(choice) = self.commander_color_choice {
++            return Some(choice);
++        }
+         self.chosen_attributes.iter().find_map(|a| match a {
+             ChosenAttribute::Color(c) => Some(*c),
+             _ => None,
+diff --git a/crates/engine/src/game/layers.rs b/crates/engine/src/game/layers.rs
+index f4bedaad70..94a1b44198 100644
+--- a/crates/engine/src/game/layers.rs
++++ b/crates/engine/src/game/layers.rs
+@@ -163,7 +163,43 @@ fn effect_candidate_ids(
+     // pass cost O(identity effects x |battlefield|) just to discover one
+     // recipient apiece.
+     let candidates = if let Some(named) = filter_names_single_object(filter, source_id) {
+-        if zones
++        // CR 400.1 + CR 604.3: when the named object IS the effect's own source
++        // (`SelfRef` — "this permanent's own characteristics"), its candidate
++        // universe is that object wherever it currently is, not merely wherever
++        // the filter's scan zones happen to point. Those zones are derived from
++        // the filter alone and default to the battlefield, which is the right
++        // default for a POPULATION filter ("creatures you control") but wrong
++        // here: a characteristic-defining ability functions in every zone
++        // (CR 604.3), so an admitted `SelfRef` CDA on a card outside the
++        // battlefield — Clara Oswald's "~ is the chosen color", read while she is
++        // still in the command zone — was silently dropped, leaving the effect
++        // with zero recipients.
++        //
++        // Deliberately NARROWED to `named == source_id`. A `SpecificObject`
++        // naming some OTHER object keeps the scan-zone gate, because that class
++        // is delivered by the off-zone authority
++        // (`off_zone_characteristics.rs`), not by this pass — pinned by
++        // `identity_shortcut_declines_for_a_predicate_and_spans_non_battlefield_zones`,
++        // whose graveyard-bound cross-object grant must NOT start landing here.
++        //
++        // Not a widening either way: the caller still runs every candidate
++        // through `matches_target_filter`, which applies its own zone rules, and
++        // the definition's zone-of-function gate was applied at gather time
++        // (`static_functions_in_zone`). A `SelfRef` whose source has left the
++        // game finds no object and yields nothing.
++        let self_is_the_named_object = named == source_id;
++        let mut named_zones: Vec<Zone> = if self_is_the_named_object {
++            state
++                .objects
++                .get(&named)
++                .map(|object| object.zone)
++                .into_iter()
++                .collect()
++        } else {
++            Vec::new()
++        };
++        named_zones.extend(zones.iter().copied());
++        if named_zones
+             .into_iter()
+             .any(|zone| zone_cache.zone_contains(state, zone, named))
+         {
+@@ -1706,6 +1742,7 @@ fn static_condition_uses_object_population(condition: &StaticCondition) -> bool
+         | StaticCondition::RecipientAttackingOwnerTarget { .. }
+         | StaticCondition::SourceIsBlocking
+         | StaticCondition::SourceIsBlocked
++        | StaticCondition::SourceIsCommander
+         | StaticCondition::IsMonarch { .. }
+         | StaticCondition::IsInitiative
+         | StaticCondition::NoMonarch
+@@ -1864,6 +1901,7 @@ fn static_condition_characteristic_reads_at(
+         | StaticCondition::RecipientAttackingOwnerTarget { .. }
+         | StaticCondition::SourceIsBlocking
+         | StaticCondition::SourceIsBlocked
++        | StaticCondition::SourceIsCommander
+         | StaticCondition::IsMonarch { .. }
+         | StaticCondition::IsInitiative
+         | StaticCondition::NoMonarch
+@@ -1994,6 +2032,7 @@ fn entered_object_perturbs_static_condition(
+         | StaticCondition::RecipientAttackingOwnerTarget { .. }
+         | StaticCondition::SourceIsBlocking
+         | StaticCondition::SourceIsBlocked
++        | StaticCondition::SourceIsCommander
+         | StaticCondition::IsMonarch { .. }
+         | StaticCondition::IsInitiative
+         | StaticCondition::NoMonarch
+@@ -2344,6 +2383,14 @@ fn evaluate_condition_inner(
+         // Callous Oppressor dying while tapped) fails this predicate and any
+         // `ForAsLongAs { SourceIsTapped }` continuous effect (gain-control, etc.) ends.
+         StaticCondition::SourceIsTapped => eval_source_is_tapped_on_battlefield(state, source_id),
++        // CR 903.3: True when the source card is a commander. The designation is
++        // an attribute of the card, set at deck construction and never cleared,
++        // so it holds in every zone — including the command zone, which is where
++        // Clara Oswald's "Impossible Girl" reads it.
++        StaticCondition::SourceIsCommander => state
++            .objects
++            .get(&source_id)
++            .is_some_and(|object| object.is_commander),
+         // CR 311.2 / CR 901.7 / CR 701.31b: the source plane/phenomenon is face up
+         // iff it is the active plane in the command zone. Planeswalking away turns
+         // it face down and removes it from the command zone (CR 701.31b), so this
+@@ -2538,6 +2585,12 @@ fn evaluate_condition_inner(
+                     .first()
+                     .is_some_and(|a| a.object_id == source_id)
+         }),
++        // CR 903.3: True when the source card is a commander. The designation
++        // lives on the card (`GameObject::is_commander`, set at deck
++        // construction and never cleared) and holds in every zone — which is
++        // exactly what the motivating card needs, since Clara Oswald's
++        // "Impossible Girl" reads it while she is still in the command zone.
++
+         // CR 508.1k: Source creature is currently an attacker.
+         StaticCondition::SourceIsAttacking => eval_source_is_attacking(state, source_id),
+         // CR 509.1g: Source creature is currently a blocker.
+@@ -4508,6 +4561,7 @@ fn static_condition_reads_life(condition: &StaticCondition) -> bool {
+         | StaticCondition::SourceIsAttacking
+         | StaticCondition::SourceIsBlocking
+         | StaticCondition::SourceIsBlocked
++        | StaticCondition::SourceIsCommander
+         | StaticCondition::IsMonarch { .. }
+         | StaticCondition::IsInitiative
+         | StaticCondition::NoMonarch
+diff --git a/crates/engine/src/game/mulligan.rs b/crates/engine/src/game/mulligan.rs
+index 6d3d0574fa..ca37de459c 100644
+--- a/crates/engine/src/game/mulligan.rs
++++ b/crates/engine/src/game/mulligan.rs
+@@ -567,8 +567,37 @@ fn validate_bottom_selection(
+     Ok(())
+ }
+ 
+-/// Queue all BeginGame abilities for cards in each player's opening hand.
++/// CR 103.6 + CR 903.6: Queue every `BeginGame` ability for each player, from
++/// BOTH zones such a card can be in before the first turn.
++///
++///   * the OPENING HAND — CR 103.6's "if this card is in your opening hand, you
++///     may begin the game with it on the battlefield" (the Leyline class), and
++///     CR 103.5b's mulligan-time abilities' pregame siblings;
++///   * the COMMAND ZONE — CR 903.6 puts each commander there at the start of the
++///     game, which is where a commander's own pregame ability has to be found.
++///     Clara Oswald's "Impossible Girl" is the motivating card: it asks for a
++///     color before the game begins while Clara is still in the command zone, so
++///     a hand-only scan could never see it.
++///
++/// Hand first, then command zone, per player, so a player's own pregame prompts
++/// arrive in printed-priority order regardless of which zone each came from. The
++/// whole list is reversed because the drain pops from the back.
+ fn queue_begin_game_abilities(state: &mut GameState) {
++    let sources = |player: &crate::types::player::Player| {
++        player
++            .hand
++            .iter()
++            .copied()
++            .chain(
++                state
++                    .command_zone
++                    .iter()
++                    .copied()
++                    .filter(|id| state.objects.get(id).is_some_and(|o| o.owner == player.id)),
++            )
++            .collect::<Vec<_>>()
++    };
++
+     let mut begin_game: Vec<PendingBeginGameAbility> = state
+         .seat_order
+         .clone()
+@@ -579,10 +608,9 @@ fn queue_begin_game_abilities(state: &mut GameState) {
+                 .iter()
+                 .find(|p| p.id == player_id)
+                 .expect("player exists");
+-            player
+-                .hand
+-                .iter()
+-                .filter_map(|&obj_id| {
++            sources(player)
++                .into_iter()
++                .filter_map(|obj_id| {
+                     let obj = state.objects.get(&obj_id)?;
+                     let ability = obj
+                         .abilities
+@@ -730,7 +758,7 @@ mod tests {
+     /// Test helper: decide for `player`, advancing `state.waiting_for` in place.
+     /// Mirrors the engine dispatch contract: callers must update `state.waiting_for`
+     /// from the returned WaitingFor before the next call.
+-    fn decide(
++    pub(super) fn decide(
+         state: &mut GameState,
+         player: PlayerId,
+         keep: bool,
+@@ -786,7 +814,7 @@ mod tests {
+         Ok(wf)
+     }
+ 
+-    fn setup_with_libraries(cards_per_player: usize) -> GameState {
++    pub(super) fn setup_with_libraries(cards_per_player: usize) -> GameState {
+         setup_n_player_with_libraries(2, cards_per_player)
+     }
+ 
+@@ -2216,3 +2244,200 @@ mod tests {
+         );
+     }
+ }
++
++#[cfg(test)]
++mod pregame_color_choice_tests {
++    use super::tests::{decide, setup_with_libraries};
++    use super::*;
++    use crate::types::ability::{
++        AbilityDefinition, ChoiceType, ColorChangeMode, ContinuousModification, Effect,
++        StaticCondition, StaticDefinition, TargetFilter, TargetSelectionMode,
++    };
++    use crate::types::actions::GameAction;
++    use crate::types::mana::ManaColor;
++
++    /// CR 607.2p: install both halves of the linked pair on a card, the way the
++    /// parser emits them from Clara Oswald's one printed paragraph.
++    fn install_impossible_girl(state: &mut GameState, card: ObjectId) {
++        let choose = AbilityDefinition::new(
++            AbilityKind::BeginGame,
++            Effect::Choose {
++                choice_type: ChoiceType::Color {
++                    excluded: Vec::new(),
++                },
++                // Matches what the parser emits for Clara Oswald — `persist: true`
++                // is what makes `named_choice_authority` build the exact-object
++                // source the answer is recorded against.
++                persist: true,
++                selection: TargetSelectionMode::Chosen,
++            },
++        );
++        let object = state.objects.get_mut(&card).expect("card exists");
++        std::sync::Arc::make_mut(&mut object.abilities).push(choose);
++        object.static_definitions.push(
++            StaticDefinition::continuous()
++                .affected(TargetFilter::SelfRef)
++                .modifications(vec![ContinuousModification::AddChosenColor {
++                    mode: ColorChangeMode::Set,
++                }])
++                .condition(StaticCondition::SourceIsCommander)
++                .cda(),
++        );
++    }
++
++    /// Move a card from its owner's hand into the command zone and mark it a
++    /// commander, mirroring CR 903.6 (the commander is there before the first
++    /// turn, which is why a hand-only pregame scan cannot find it).
++    fn make_commander(state: &mut GameState, player: PlayerId, card: ObjectId) {
++        state
++            .players
++            .iter_mut()
++            .find(|p| p.id == player)
++            .expect("player exists")
++            .hand
++            .retain(|id| *id != card);
++        let object = state.objects.get_mut(&card).expect("card exists");
++        object.zone = Zone::Command;
++        object.is_commander = true;
++        state.command_zone.push_back(card);
++    }
++
++    /// CR 607.2p + CR 903.6: the pregame color choice is offered from the COMMAND
++    /// ZONE (not the opening hand), the answer is recorded on the object, and the
++    /// characteristic-defining half makes the commander that color.
++    #[test]
++    fn commander_pregame_color_choice_is_offered_and_applied() {
++        let mut state = setup_with_libraries(20);
++        let mut events = Vec::new();
++        state.waiting_for = start_mulligan(&mut state, &mut events);
++
++        let clara = state.players[0].hand[0];
++        make_commander(&mut state, PlayerId(0), clara);
++        install_impossible_girl(&mut state, clara);
++
++        // Reach guard: the choice is still unset before the pregame drain runs.
++        assert_eq!(state.objects[&clara].commander_color_choice, None);
++        assert!(
++            !state.objects[&clara].color.contains(&ManaColor::Red),
++            "reach guard: the commander must not already be red"
++        );
++
++        decide(&mut state, PlayerId(0), true, &mut events);
++        decide(&mut state, PlayerId(1), true, &mut events);
++
++        let WaitingFor::NamedChoice {
++            player,
++            choice_type,
++            options,
++            source,
++            ..
++        } = state.waiting_for.clone()
++        else {
++            panic!(
++                "the commander's pregame color choice must be offered, got {:?}",
++                state.waiting_for
++            );
++        };
++        assert_eq!(player, PlayerId(0));
++        assert!(matches!(choice_type, ChoiceType::Color { .. }));
++        assert_eq!(
++            options.len(),
++            5,
++            "CR 105.1: five colors are the legal choices"
++        );
++        assert!(
++            source
++                .as_ref()
++                .and_then(|s| s.context.as_ref())
++                .is_some_and(|context| context.identity.reference.object_id == clara),
++            "the choice must be bound to the commander in the command zone"
++        );
++
++        let result = crate::game::engine::apply(
++            &mut state,
++            PlayerId(0),
++            GameAction::ChooseOption {
++                choice: "Red".to_string(),
++            },
++        )
++        .expect("choosing a color before the game begins must be legal");
++
++        assert_eq!(
++            state.objects[&clara].commander_color_choice,
++            Some(ManaColor::Red),
++            "CR 607.2p: the pregame choice is recorded on the card"
++        );
++        assert!(
++            state.objects[&clara].color.contains(&ManaColor::Red),
++            "the characteristic-defining half must make the commander red, got {:?}",
++            state.objects[&clara].color
++        );
++        assert!(
++            matches!(result.waiting_for, WaitingFor::Priority { .. }),
++            "the pregame drain must settle to priority, got {:?}",
++            result.waiting_for
++        );
++    }
++
++    /// CR 400.7 + CR 607.2p: the choice SURVIVES a zone change. This is the
++    /// reason the answer lives in a dedicated field rather than
++    /// `chosen_attributes`, which `reset_for_battlefield_entry` clears.
++    #[test]
++    fn the_pregame_color_choice_survives_battlefield_entry() {
++        let mut state = setup_with_libraries(20);
++        let mut events = Vec::new();
++        state.waiting_for = start_mulligan(&mut state, &mut events);
++
++        let clara = state.players[0].hand[0];
++        make_commander(&mut state, PlayerId(0), clara);
++        install_impossible_girl(&mut state, clara);
++
++        decide(&mut state, PlayerId(0), true, &mut events);
++        decide(&mut state, PlayerId(1), true, &mut events);
++        crate::game::engine::apply(
++            &mut state,
++            PlayerId(0),
++            GameAction::ChooseOption {
++                choice: "Green".to_string(),
++            },
++        )
++        .expect("choosing a color must be legal");
++
++        // Simulate the commander resolving onto the battlefield: this is the
++        // reset that clears `chosen_attributes`.
++        {
++            let object = state.objects.get_mut(&clara).expect("card exists");
++            object.zone = Zone::Battlefield;
++            object.reset_for_battlefield_entry(1, 1);
++        }
++
++        assert_eq!(
++            state.objects[&clara].commander_color_choice,
++            Some(ManaColor::Green),
++            "CR 607.2p: the choice must survive the zone change"
++        );
++        assert_eq!(
++            state.objects[&clara].chosen_color(),
++            Some(ManaColor::Green),
++            "the chosen-color accessor must still answer after the reset"
++        );
++    }
++
++    /// The pregame drain is a no-op when no card carries a `BeginGame` ability —
++    /// the bypass every existing game takes.
++    #[test]
++    fn no_begin_game_ability_leaves_the_pregame_flow_unchanged() {
++        let mut state = setup_with_libraries(20);
++        let mut events = Vec::new();
++        state.waiting_for = start_mulligan(&mut state, &mut events);
++
++        decide(&mut state, PlayerId(0), true, &mut events);
++        let waiting = decide(&mut state, PlayerId(1), true, &mut events);
++
++        assert!(
++            matches!(waiting, WaitingFor::Priority { .. }),
++            "with no pregame ability the game must start straight away, got {waiting:?}"
++        );
++        assert!(!state.resolving_begin_game_abilities);
++    }
++}
+diff --git a/crates/engine/src/game/quantity.rs b/crates/engine/src/game/quantity.rs
+index 0000e271ef..8ce85632ef 100644
+--- a/crates/engine/src/game/quantity.rs
++++ b/crates/engine/src/game/quantity.rs
+@@ -2412,6 +2412,7 @@ pub(crate) fn static_condition_uses_unspent_mana(condition: &StaticCondition) ->
+         | StaticCondition::DuringYourTurn
+         | StaticCondition::DuringOpponentsTurn
+         | StaticCondition::SourceEnteredThisTurn
++        | StaticCondition::SourceIsCommander
+         | StaticCondition::SourceHasDealtDamage
+         | StaticCondition::WasCast { .. }
+         | StaticCondition::IsRingBearer
+diff --git a/crates/engine/src/parser/oracle.rs b/crates/engine/src/parser/oracle.rs
+index c58f82e31e..9570264371 100644
+--- a/crates/engine/src/parser/oracle.rs
++++ b/crates/engine/src/parser/oracle.rs
+@@ -707,6 +707,103 @@ fn parse_begin_game_clause(line: &str, lower: &str) -> Option<AbilityDefinition>
+     Some(def)
+ }
+ 
++/// CR 607.2p + CR 903.3: Recognize the "choose a color before the game begins"
++/// characteristic-defining pair — "If ~ is your commander, choose a color
++/// before the game begins. ~ is the chosen color." (Clara Oswald, "Impossible
++/// Girl").
++///
++/// One printed paragraph, TWO abilities, and the rules make them a LINKED pair
++/// (CR 607.2p): the first causes the pregame choice, the second is the
++/// characteristic-defining ability that reads it, and "the second ability refers
++/// only to the choice made as a result of the first ability and continues to
++/// refer to that choice as the object changes zones during the game".
++///
++/// So this recognizer emits both, in printed order:
++///
++///   1. a `AbilityKind::BeginGame` ability whose effect is
++///      `Effect::Choose { ChoiceType::Color }`. It is NOT a triggered or
++///      activated ability — CR 903.3a's class of abilities "functions before the
++///      game begins" — so it joins the existing pregame drain
++///      (`mulligan::resume_begin_game_abilities`) rather than the stack. Its
++///      answer is written to `GameObject::commander_color_choice` by the
++///      `Choose` resolver, which is the ONE place that can write a value that
++///      must survive zone changes (`chosen_attributes` is cleared per
++///      battlefield entry, CR 400.7 — see that field's doc).
++///   2. a characteristic-defining static (`StaticDefinition::cda`, CR 604.3)
++///      gated on `StaticCondition::SourceIsCommander`, applying
++///      `ContinuousModification::AddChosenColor { mode: Set }` to the source.
++///      `Set` is CR 105.3's default: "~ is the chosen color" replaces the
++///      printed colors rather than adding to them, which is what makes Clara
++///      colorless-or-chosen rather than always-five-color for identity purposes.
++///
++/// The commander gate is matched as text rather than inferred, so the class this
++/// covers is exactly "a pregame color choice whose reader is conditioned on
++/// being your commander". A future "... is your commander, choose a color before
++/// the game begins" card with a different reader needs its own recognizer rather
++/// than a silently-wrong reuse of this one.
++///
++/// `persist: true` is required, and the reason is structural rather than about
++/// where the answer ends up: `named_choice_authority` only builds the
++/// `NamedChoiceSource` (and the `ExactObjectAndResolution` binding the answer
++/// path keys on) when the choice both persists and names an exact source. A
++/// `persist: false` color prompt arrives with `source: None`, so the choice
++/// handler has no source object to record anything against — the durable write
++/// this card needs could not happen at all. Persisting also gives the ordinary
++/// `chosen_attributes` record, and `GameObject::chosen_color` reads the durable
++/// commander field FIRST, so the two can never disagree in practice.
++fn try_parse_pregame_color_choice_cda(
++    line: &str,
++    lower: &str,
++) -> Option<(AbilityDefinition, StaticDefinition)> {
++    // Preamble: "[ability word — ]if ~ is your commander, choose a color before
++    // the game begins. ~ is the chosen color."
++    let (_, tail) = nom_on_lower(line, lower, |input| {
++        let (input, _) = opt((take_until::<_, _, OracleError<'_>>("—"), tag("— "))).parse(input)?;
++        let (input, _) = alt((
++            tag("if ~ is your commander, "),
++            tag("if this card is your commander, "),
++            tag("if this creature is your commander, "),
++        ))
++        .parse(input)?;
++        let (input, _) = tag("choose a color before the game begins. ").parse(input)?;
++        let (input, _) = alt((
++            tag("~ is the chosen color"),
++            tag("this card is the chosen color"),
++        ))
++        .parse(input)?;
++        let (input, _) = opt(tag(".")).parse(input)?;
++        Ok((input, ()))
++    })?;
++    // Nothing may follow: a trailing sentence is a different ability, and this
++    // recognizer would be dropping it.
++    if !tail.trim().is_empty() {
++        return None;
++    }
++
++    let choose = AbilityDefinition::new(
++        AbilityKind::BeginGame,
++        Effect::Choose {
++            choice_type: ChoiceType::Color {
++                excluded: Vec::new(),
++            },
++            persist: true,
++            selection: crate::types::ability::TargetSelectionMode::Chosen,
++        },
++    )
++    .description(line.to_string());
++
++    let static_def = StaticDefinition::continuous()
++        .affected(TargetFilter::SelfRef)
++        .modifications(vec![ContinuousModification::AddChosenColor {
++            mode: crate::types::ability::ColorChangeMode::Set,
++        }])
++        .condition(StaticCondition::SourceIsCommander)
++        .cda()
++        .description(line.to_string());
++
++    Some((choose, static_def))
++}
++
+ /// Parse the "with [N] [type] counter(s) on it" sub-clause of a begin-game line.
+ ///
+ /// CR 122.1: counters placed on the permanent as it enters. The count defaults
+@@ -7443,6 +7540,23 @@ fn parse_normalized_oracle_ir(
+             continue;
+         }
+ 
++        // CR 607.2p + CR 903.3: "If ~ is your commander, choose a color before
++        // the game begins. ~ is the chosen color." (Clara Oswald, "Impossible
++        // Girl"). Run BEFORE the begin-game recognizer below — both are
++        // pregame-ability recognizers, and only this one matches a line whose
++        // preamble is "if ~ is your commander" rather than "if this card is in
++        // your opening hand", so their input shapes are disjoint.
++        //
++        // Two abilities come out of one printed paragraph (CR 607.2p makes them
++        // a linked pair), so the static half is emitted through the static node
++        // at the same source position, immediately after the choice half.
++        if let Some((choice, cda)) = try_parse_pregame_color_choice_cda(&line, &lower) {
++            emitter.ability_at(item_line, choice);
++            emitter.static_ir_at(item_line, StaticIr::from_definition(&line, cda));
++            i += 1;
++            continue;
++        }
++
+         // Priority 8c: "If this card is in your opening hand, you may begin the game with it on the battlefield"
+         // CR 103.6: The Leyline rule — opt-in at game start, never compelled.
+         // `parse_begin_game_clause` is the sole detector — the parser IS the
+diff --git a/crates/engine/src/parser/oracle_condition.rs b/crates/engine/src/parser/oracle_condition.rs
+index 1263d4972f..0745b4ad7d 100644
+--- a/crates/engine/src/parser/oracle_condition.rs
++++ b/crates/engine/src/parser/oracle_condition.rs
+@@ -227,6 +227,9 @@ fn static_condition_to_restriction_condition(
+     condition: StaticCondition,
+ ) -> Option<ParsedCondition> {
+     match condition {
++        // CR 903.3: produced by the dedicated pregame recognizer, never by text —
++        // there is no surface phrasing for this converter to round-trip.
++        StaticCondition::SourceIsCommander => None,
+         // ---- Exactly representable -------------------------------------------------
+         StaticCondition::QuantityComparison {
+             lhs,
+diff --git a/crates/engine/src/parser/oracle_effect/conditions.rs b/crates/engine/src/parser/oracle_effect/conditions.rs
+index 0fcf6d8a5c..707bad4026 100644
+--- a/crates/engine/src/parser/oracle_effect/conditions.rs
++++ b/crates/engine/src/parser/oracle_effect/conditions.rs
+@@ -5859,6 +5859,9 @@ pub(crate) fn static_condition_to_ability_condition(
+     ctx: &mut ParseContext,
+ ) -> Option<AbilityCondition> {
+     match sc {
++        // CR 903.3: produced by the dedicated pregame recognizer, never by text —
++        // there is no surface phrasing for this converter to round-trip.
++        StaticCondition::SourceIsCommander => None,
+         StaticCondition::DuringYourTurn => Some(AbilityCondition::IsYourTurn),
+         StaticCondition::QuantityComparison {
+             lhs,
+diff --git a/crates/engine/src/parser/oracle_static/static_helpers.rs b/crates/engine/src/parser/oracle_static/static_helpers.rs
+index 26bfa0284f..668b9f844f 100644
+--- a/crates/engine/src/parser/oracle_static/static_helpers.rs
++++ b/crates/engine/src/parser/oracle_static/static_helpers.rs
+@@ -1732,6 +1732,7 @@ fn rebind_scoped_designation_anaphor(condition: &mut StaticCondition, antecedent
+         | StaticCondition::DuringOpponentsTurn
+         | StaticCondition::SharesColorWithMostCommonColorAmongPermanents
+         | StaticCondition::SourceEnteredThisTurn
++        | StaticCondition::SourceIsCommander
+         | StaticCondition::SourceHasDealtDamage
+         | StaticCondition::WasCast { .. }
+         | StaticCondition::IsRingBearer
+diff --git a/crates/engine/src/parser/oracle_trigger.rs b/crates/engine/src/parser/oracle_trigger.rs
+index 82d0902175..2eb872a2ad 100644
+--- a/crates/engine/src/parser/oracle_trigger.rs
++++ b/crates/engine/src/parser/oracle_trigger.rs
+@@ -5804,6 +5804,9 @@ pub(crate) fn static_condition_to_trigger_condition(
+     sc: &StaticCondition,
+ ) -> Option<TriggerCondition> {
+     match sc {
++        // CR 903.3: produced by the dedicated pregame recognizer, never by text —
++        // there is no surface phrasing for this converter to round-trip.
++        StaticCondition::SourceIsCommander => None,
+         StaticCondition::DuringYourTurn => Some(TriggerCondition::DuringPlayersTurn {
+             player: PlayerFilter::Controller,
+         }),
+diff --git a/crates/engine/src/types/ability.rs b/crates/engine/src/types/ability.rs
+index 5ec3efe017..58f88cb281 100644
+--- a/crates/engine/src/types/ability.rs
++++ b/crates/engine/src/types/ability.rs
+@@ -11996,6 +11996,27 @@ pub enum StaticCondition {
+     /// Once a creature is blocked, it remains blocked for the rest of combat even
+     /// if all its blockers leave — mirrors `AttackerInfo.blocked` (sticky flag).
+     SourceIsBlocked,
++    /// CR 903.3: True when the source card is a commander. Commander designation
++    /// is "an attribute of the card itself", not a characteristic, and "the card
++    /// retains this designation even when it changes zones" — so this reads
++    /// `GameObject::is_commander`, which is set once at deck construction and
++    /// never cleared, and it is true in every zone including the command zone.
++    ///
++    /// CR 903.3d sharpens the distinction the read has to respect: an effect
++    /// that refers to CONTROLLING a commander means a permanent on the
++    /// battlefield, while an effect that refers to "your commander" in a named
++    /// zone — or to a characteristic of your commander, which CR 903.3e allows
++    /// "in all zones, including that player's library and hand" — does not.
++    /// This variant is the source-identity read only; a controller-gated
++    /// variant (`SourceIsYourCommander`) belongs with it if a card needs one.
++    ///
++    /// Motivating card — Clara Oswald, "Impossible Girl — If Clara Oswald is
++    /// your commander, choose a color before the game begins. Clara Oswald is
++    /// the chosen color." CR 607.2p makes that choice/reader pair linked
++    /// abilities whose reference survives zone changes, so the chosen color
++    /// lives in `GameObject::commander_color_choice` rather than in
++    /// `chosen_attributes` (which CR 400.7 clears on each battlefield entry).
++    SourceIsCommander,
+     /// CR 725.1: monarch IDENTITY — true when `player` currently holds the
+     /// monarch designation (CR 725.3: exactly one player at a time; CR 725.4
+     /// governs reassignment). Distinct from [`NoMonarch`](Self::NoMonarch),
+@@ -12373,6 +12394,7 @@ impl StaticCondition {
+             | StaticCondition::DuringOpponentsTurn
+             | StaticCondition::SharesColorWithMostCommonColorAmongPermanents
+             | StaticCondition::SourceEnteredThisTurn
++            | StaticCondition::SourceIsCommander
+             | StaticCondition::SourceHasDealtDamage
+             | StaticCondition::WasCast { .. }
+             | StaticCondition::IsRingBearer
+@@ -12468,6 +12490,7 @@ impl StaticCondition {
+             | StaticCondition::SourceIsAttacking
+             | StaticCondition::SourceIsBlocking
+             | StaticCondition::SourceIsBlocked
++            | StaticCondition::SourceIsCommander
+             | StaticCondition::IsMonarch { .. }
+             | StaticCondition::IsInitiative
+             | StaticCondition::NoMonarch
+@@ -12701,6 +12724,7 @@ impl StaticCondition {
+             | StaticCondition::SourceIsAttacking
+             | StaticCondition::SourceIsBlocking
+             | StaticCondition::SourceIsBlocked
++            | StaticCondition::SourceIsCommander
+             | StaticCondition::IsMonarch { .. }
+             | StaticCondition::IsInitiative
+             | StaticCondition::NoMonarch
+@@ -12818,6 +12842,7 @@ impl StaticCondition {
+             | StaticCondition::SourceIsAttacking
+             | StaticCondition::SourceIsBlocking
+             | StaticCondition::SourceIsBlocked
++            | StaticCondition::SourceIsCommander
+             | StaticCondition::IsMonarch { .. }
+             | StaticCondition::IsInitiative
+             | StaticCondition::NoMonarch

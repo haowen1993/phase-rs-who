@@ -1,0 +1,29 @@
+From 537a78cbfaa1b71713b761a9817d9c2e804badba Mon Sep 17 00:00:00 2001
+From: haowen1993 <39072333+haowen1993@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 23:47:39 +0800
+Subject: [PATCH 7/9] chore(wasm): refresh the tracked engine type definitions
+
+`client/src/wasm/engine_wasm.d.ts` is a git-tracked build output, so
+rebuilding the engine WASM after this change refreshed the doc comment it
+carries for `get_viewer_transition_snapshot_js`. Content-only: the three
+lines mirror the Rust doc comment already in the tree.
+---
+ client/src/wasm/engine_wasm.d.ts | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/client/src/wasm/engine_wasm.d.ts b/client/src/wasm/engine_wasm.d.ts
+index a938895b34..1e6d6c39de 100644
+--- a/client/src/wasm/engine_wasm.d.ts
++++ b/client/src/wasm/engine_wasm.d.ts
+@@ -342,8 +342,9 @@ export function get_stack_pressure(): any;
+ export function get_viewer_snapshot_js(player_id: number): any;
+ 
+ /**
+- * Get the viewer-filtered state, legal actions, interaction projection, and
+- * event slice associated with one engine transition.
++ * Combined viewer projection and event slice for one engine transition.
++ * Unlike the legacy state-only endpoint, this path validates the viewer id
++ * before narrowing it to the engine's representable PlayerId domain.
+  */
+ export function get_viewer_transition_snapshot_js(player_id: number, events: any): any;
+ 

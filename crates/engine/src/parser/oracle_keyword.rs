@@ -3597,6 +3597,21 @@ mod tests {
             parse_granted_keyword_fragment("vanishing"),
             Some(Keyword::Vanishing(0))
         );
+
+        // CR 702.63b end to end through the ROUTER, on the real printed line, with
+        // and without MTGJSON keyword metadata. Both must yield the keyword: Out of
+        // Time and Tidewalker reach the router one way or the other, and the card
+        // records still showed the line dropped, so this pins which seams are
+        // actually covered before looking further upstream.
+        let line = "Vanishing (At the beginning of your upkeep, remove a time counter \
+                    from this creature. When the last is removed, sacrifice it.)";
+        for names in [vec!["Vanishing".to_string()], Vec::new()] {
+            assert_eq!(
+                parse_router_keyword_list(line, &names),
+                Some(vec![Keyword::Vanishing(0)]),
+                "router must claim the numberless Vanishing line (metadata: {names:?})"
+            );
+        }
         // Fading shares the normalizer with no dedicated arm — proves the class.
         assert_eq!(
             parse_granted_keyword_fragment("fading 2 if it's an artifact"),

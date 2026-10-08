@@ -7592,20 +7592,34 @@ fn check_replacements(
     }
 }
 
-/// Build a lexicon of every subtype that appears on at least one printed
-/// card face. Used by [`check_subtype_lexicon`] to flag parser misfires:
-/// any `AddSubtype { subtype }` whose value isn't a real printed subtype
-/// (e.g. `"Gets"`, `"Until"`, `"+1/+1"`) signals that the animation or
-/// static-ability parser tokenized English filler words as subtypes.
+/// Build the lexicon of real subtypes that [`check_subtype_lexicon`] validates
+/// against, so an `AddSubtype { subtype }` value that no authority recognizes
+/// (e.g. `"Gets"`, `"Until"`, `"+1/+1"`) signals a parser misfire.
 ///
-/// The MTG Comprehensive Rules define valid subtypes (CR 205.3), but the
-/// printed corpus is the authoritative source for the engine — anything
-/// that has appeared on a real card's type line is valid.
+/// Union of two sources, and it needs both:
+///
+/// * every subtype printed on a card face (CR 205.3 — the printed corpus is the
+///   authoritative source for the engine), and
+/// * the PARSER's own vocabulary, which the parser consults before it ever emits
+///   an `AddSubtype`.
+///
+/// The second is what stops the check from flagging a correct parse. A subtype
+/// that appears only on tokens never reaches a face's type line, so a
+/// face-derived lexicon alone called `Germ` (Microscope), `Gold` (Kylem
+/// All-Star), `Blinkmoth` (Inkmoth Nexus, Blinkmoth Nexus), `Llama` (Restless
+/// Prairie) and `Balloon` (The Jolly Balloon Man) misfires — six cards whose
+/// parse was right and whose support flag was wrong.
 fn collect_valid_subtypes(card_db: &CardDatabase) -> HashSet<String> {
-    card_db
+    let mut valid: HashSet<String> = card_db
         .face_iter()
         .flat_map(|(_, face)| face.card_type.subtypes.iter().cloned())
-        .collect()
+        .collect();
+    valid.extend(
+        crate::parser::oracle_util::oracle_subtype_vocabulary()
+            .iter()
+            .cloned(),
+    );
+    valid
 }
 
 /// Visit every `ContinuousModification` reachable from a card face.

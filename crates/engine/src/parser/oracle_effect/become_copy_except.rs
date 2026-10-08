@@ -96,7 +96,7 @@ use super::super::oracle_keyword::parse_granted_keyword_fragment;
 use super::super::oracle_nom::bridge::{nom_on_lower, split_once_on_lower};
 use super::super::oracle_nom::primitives as nom_primitives;
 use super::super::oracle_static::{parse_quoted_ability_modifications, split_keyword_list};
-use super::super::oracle_util::canonicalize_subtype_name;
+use super::super::oracle_util::{canonicalize_subtype_name, parse_subtype};
 use super::animation::{core_type_from_animation_word, split_in_addition_tail};
 use crate::parser::oracle_ir::context::ParseContext;
 use crate::types::ability::{
@@ -938,6 +938,19 @@ fn parse_theyre_pt_and_types(input: &str) -> Option<(&str, Vec<ContinuousModific
     Some((rest, mods))
 }
 
+/// CR 707.9a: classify a comma/`and`-separated keyword list into `AddKeyword`
+/// modifications. The single authority for "a run of keyword names is a keyword
+/// grant" — the same classification `parse_has_keywords` performs for the
+/// "…and has flying, haste" spelling, applied here to the "…with menace" spelling
+/// that opens the tail of a copy exception's characteristic list.
+fn append_keyword_list_modifications(keyword_text: &str, out: &mut Vec<ContinuousModification>) {
+    for part in split_keyword_list(keyword_text) {
+        if let Some(keyword) = parse_granted_keyword_fragment(part.trim()) {
+            out.push(ContinuousModification::AddKeyword { keyword });
+        }
+    }
+}
+
 /// CR 707.9b + CR 707.9d: append the color and type modifications declared by a
 /// copy exception's type list. `replace_color` selects `SetColor` (no carve-out
 /// for color) vs per-color `AddColor`; `replace_types` selects whether an exact
@@ -948,6 +961,10 @@ fn parse_theyre_pt_and_types(input: &str) -> Option<(&str, Vec<ContinuousModific
 /// addition to his other types") is a CR 707.9b power/toughness override, not
 /// a type word — classified before the type/subtype arms below so it never
 /// reaches the subtype fallback.
+///
+/// The list is closed by whichever comes first: a word the subtype vocabulary
+/// does not recognize, or the `with` keyword connector (whose tail is granted as
+/// keywords). Neither is a subtype, and neither may be invented into one.
 fn append_color_and_type_modifications(
     type_text: &str,
     replace_color: bool,
@@ -957,9 +974,24 @@ fn append_color_and_type_modifications(
     let mut colors = Vec::new();
     let mut type_mods = Vec::new();
     let mut has_exact_creature_subtype = false;
-    for word in type_text.split_whitespace() {
+    // Index-based rather than `for word in …`: the "with" connector below needs
+    // everything AFTER it, which a plain iterator cannot hand back.
+    let words: Vec<&str> = type_text.split_whitespace().collect();
+    let mut index = 0;
+    while index < words.len() {
+        let raw_word = words[index];
+        index += 1;
+        let word = raw_word.trim_matches(|c: char| c == ',' || c == '.');
         if word.is_empty() || word == "and" || word == "token" {
             continue;
+        }
+        // CR 707.9a: "except it's a 3/3 black Wraith with menace" — "with" opens a
+        // KEYWORD clause, not another type word. Everything after it belongs to the
+        // keyword axis, so the characteristic list closes here and the tail is
+        // classified the same way `parse_has_keywords` classifies one.
+        if word.eq_ignore_ascii_case("with") {
+            append_keyword_list_modifications(&words[index..].join(" "), mods);
+            break;
         }
         if let Ok((rest, color)) = nom_primitives::parse_color(word) {
             if rest.is_empty() {
@@ -998,15 +1030,21 @@ fn append_color_and_type_modifications(
             type_mods.push(ContinuousModification::AddType { core_type });
             continue;
         }
-        let canonical = canonicalize_subtype_name(word);
-        if let Ok(core_type) = CoreType::from_str(&canonical) {
-            type_mods.push(ContinuousModification::AddType { core_type });
-        } else {
-            if noncreature_subtype_set(&canonical).is_none() {
-                has_exact_creature_subtype = true;
-            }
-            type_mods.push(ContinuousModification::AddSubtype { subtype: canonical });
+        // CR 205.3a: a word the subtype vocabulary does not recognize is not a
+        // subtype, and fabricating one from it is how "except it's a 3/3 black
+        // Wraith with menace" grew the creature subtypes `With` and `Menace` on
+        // Sauron, the Necromancer, Will of the Temur, Kaya, Leonardo da Vinci and
+        // Dino DNA — five cards that were also left without the keyword their
+        // sentence actually grants. `parse_subtype` is the same recognizer the
+        // rest of the parser uses, plurals included, so a recognized word still
+        // gets its canonical singular spelling.
+        let Some((canonical, _)) = parse_subtype(&word.to_lowercase()) else {
+            continue;
+        };
+        if noncreature_subtype_set(&canonical).is_none() {
+            has_exact_creature_subtype = true;
         }
+        type_mods.push(ContinuousModification::AddSubtype { subtype: canonical });
     }
     if !colors.is_empty() {
         // CR 613.1e: color-changing modifications apply at layer 5.
@@ -2114,6 +2152,77 @@ mod tests {
             mods.iter()
                 .any(|m| matches!(m, ContinuousModification::GrantTrigger { .. })),
             "expected a GrantTrigger for the quoted sacrifice ability, got {mods:?}"
+        );
+    }
+
+    /// CR 707.9a + CR 205.3a: "…except it's a N/M <colors> <subtype> with
+    /// <keywords>" closes its characteristic list at the `with` connector. The
+    /// words after it are KEYWORDS; before this, the word-split classified every
+    /// leftover word as a subtype, so the class (Sauron, the Necromancer; Will of
+    /// the Temur; Kaya, Intangible Slayer; Leonardo da Vinci; Dino DNA) carried
+    /// the invented creature subtypes `With` + `Menace`/`Flying`/`Trample` and
+    /// never granted the keyword the sentence asks for.
+    #[test]
+    fn except_pt_types_with_keyword_tail_grants_the_keyword_not_a_subtype() {
+        let (_, mods) = parse_except_clause(
+            ", except it's a 3/3 black Wraith with menace.",
+            "Sauron, the Necromancer",
+            &ParseContext::default(),
+        )
+        .unwrap();
+        let subtypes: Vec<&str> = mods
+            .iter()
+            .filter_map(|m| match m {
+                ContinuousModification::AddSubtype { subtype } => Some(subtype.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            subtypes,
+            vec!["Wraith"],
+            "the subtype list closes at the `with` connector; got {mods:?}"
+        );
+        assert!(
+            mods.contains(&ContinuousModification::AddKeyword {
+                keyword: Keyword::Menace,
+            }),
+            "the keyword the connector introduces must be granted; got {mods:?}"
+        );
+        assert!(
+            mods.contains(&ContinuousModification::SetColor {
+                colors: vec![ManaColor::Black],
+            }) || mods
+                .iter()
+                .any(|m| matches!(m, ContinuousModification::AddColor { .. })),
+            "the color word still classifies; got {mods:?}"
+        );
+    }
+
+    /// CR 205.3a: a word no authority recognizes is NOT a subtype. The `with`
+    /// connector is handled above; this pins the other closer — an unrecognized
+    /// word ends the list rather than being invented into a creature subtype.
+    #[test]
+    fn except_type_list_does_not_invent_subtypes_from_unknown_words() {
+        let (_, mods) = parse_except_clause(
+            ", except it's a 4/4 Dragon creature with flying",
+            "Test Card",
+            &ParseContext::default(),
+        )
+        .unwrap();
+        assert!(
+            !mods.iter().any(|m| matches!(
+                m,
+                ContinuousModification::AddSubtype { subtype }
+                    if subtype.eq_ignore_ascii_case("with")
+                        || subtype.eq_ignore_ascii_case("flying")
+            )),
+            "neither the connector nor a keyword is a subtype; got {mods:?}"
+        );
+        assert!(
+            mods.contains(&ContinuousModification::AddSubtype {
+                subtype: "Dragon".to_string(),
+            }),
+            "the real subtype is still emitted; got {mods:?}"
         );
     }
 

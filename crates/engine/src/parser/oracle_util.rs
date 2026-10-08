@@ -1209,6 +1209,16 @@ fn oracle_subtypes() -> &'static [String] {
     &ORACLE_SUBTYPES
 }
 
+/// The parser's authoritative subtype vocabulary, exposed so callers outside the
+/// parser agree with it on what a subtype IS rather than keeping a second list.
+/// The coverage checker's `check_subtype_lexicon` unions this with the printed
+/// type lines, so a token-only subtype the parser legitimately emits (`Germ`,
+/// `Gold`, `Blinkmoth`, `Llama`, `Balloon`) is no longer mistaken for filler the
+/// parser invented.
+pub fn oracle_subtype_vocabulary() -> &'static [String] {
+    oracle_subtypes()
+}
+
 /// Test whether a lowercased candidate word names an MTG core type.
 /// CR 205.2: Core types are artifact, battle, creature, enchantment, instant,
 /// land, planeswalker, sorcery, tribal. `card`, `permanent`, and `spell` are

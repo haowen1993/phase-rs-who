@@ -233,9 +233,16 @@ pub(crate) fn animation_modifications(
         if let Ok(core_type) = CoreType::from_str(type_name) {
             modifications.push(ContinuousModification::AddType { core_type });
         } else {
-            modifications.push(ContinuousModification::AddSubtype {
-                subtype: type_name.clone(),
-            });
+            // CR 205.3a: a subtype is singular in the rules even where the printed
+            // sentence pluralizes it because its subject is plural — "noncreature
+            // artifacts you control become 3/3 Vehicles in addition to their other
+            // types" (New New York). The spec's token carries the printed word, so
+            // route it through the parser's subtype recognizer (plural-aware, both
+            // regular and irregular) instead of copying the plural into the AST,
+            // where no authority would recognize it.
+            let subtype = crate::parser::oracle_util::parse_subtype(type_name)
+                .map_or_else(|| type_name.clone(), |(canonical, _)| canonical);
+            modifications.push(ContinuousModification::AddSubtype { subtype });
         }
     }
 
@@ -813,9 +820,16 @@ pub(crate) fn parse_becomes_type_modifications(
                 }
             }
             AnimationTypeToken::Subtype(name) => {
-                let modification = ContinuousModification::AddSubtype {
-                    subtype: title_case_word(&name),
-                };
+                // CR 205.3a: a subtype is singular, but the printed sentence
+                // pluralizes it whenever the subject is plural — "noncreature
+                // artifacts you control become 3/3 Vehicles in addition to their
+                // other types" (New New York). Route the token through the
+                // parser's subtype recognizer, which resolves regular and
+                // irregular plurals, rather than title-casing the plural into a
+                // subtype the rules do not contain.
+                let subtype = crate::parser::oracle_util::parse_subtype(&name)
+                    .map_or_else(|| title_case_word(&name), |(canonical, _)| canonical);
+                let modification = ContinuousModification::AddSubtype { subtype };
                 if !modifications.contains(&modification) {
                     modifications.push(modification);
                 }
@@ -1540,6 +1554,84 @@ mod test_den_bugbear {
         // Empty / malformed input produces no modifications.
         assert!(parse_becomes_type_modifications("").is_empty());
         assert!(parse_becomes_type_modifications("   ").is_empty());
+    }
+
+    /// CR 205.3a: a subtype is SINGULAR even where the printed sentence
+    /// pluralizes it, because the subject is plural — "noncreature artifacts you
+    /// control become 3/3 Vehicles in addition to their other types" (New New
+    /// York). Title-casing the plural emitted the subtype `Vehicles`, which no
+    /// authority contains, so the card was flagged a parser misfire while its
+    /// parse was right. The recognizer resolves the regular plural, so the
+    /// sibling plural forms are pinned alongside it.
+    /// CR 205.3a: a subtype is SINGULAR even where the printed sentence
+    /// pluralizes it, because the subject is plural — "noncreature artifacts you
+    /// control become 3/3 Vehicles in addition to their other types" (New New
+    /// York). Copying the spec's printed word into the AST emitted the subtype
+    /// `Vehicles`, which no authority contains, so the card was flagged a parser
+    /// misfire while its parse was right. The recognizer resolves the regular and
+    /// irregular plurals, so both are pinned.
+    #[test]
+    fn animation_modifications_singularizes_a_plural_subtype() {
+        use crate::types::ability::ContinuousModification;
+
+        let spec = parse_animation_spec(
+            "3/3 Vehicles in addition to their other types",
+            &mut ParseContext::default(),
+        )
+        .expect("New New York's animation phrase should parse");
+        assert!(
+            animation_modifications(&spec).contains(&ContinuousModification::AddSubtype {
+                subtype: "Vehicle".into()
+            }),
+            "plural subtype must canonicalize; got {:?}",
+            animation_modifications(&spec)
+        );
+
+        for (plural, singular) in [
+            ("Soldiers", "Soldier"),
+            ("Elves", "Elf"),
+            ("Heroes", "Hero"),
+        ] {
+            let spec = parse_animation_spec(
+                &format!("1/1 {plural} in addition to their other types"),
+                &mut ParseContext::default(),
+            )
+            .expect("plural animation phrase should parse");
+            assert!(
+                animation_modifications(&spec).contains(&ContinuousModification::AddSubtype {
+                    subtype: singular.into()
+                }),
+                "{plural} must canonicalize to {singular}; got {:?}",
+                animation_modifications(&spec)
+            );
+        }
+    }
+
+    #[test]
+    fn becomes_type_modifications_singularizes_a_plural_subtype() {
+        use crate::types::ability::ContinuousModification;
+
+        assert_eq!(
+            parse_becomes_type_modifications("Vehicles in addition to their other types"),
+            vec![ContinuousModification::AddSubtype {
+                subtype: "Vehicle".into()
+            }]
+        );
+        for (plural, singular) in [
+            ("Soldiers", "Soldier"),
+            ("Elves", "Elf"),
+            ("Heroes", "Hero"),
+        ] {
+            let modifications = parse_becomes_type_modifications(&format!(
+                "{plural} in addition to their other types"
+            ));
+            assert!(
+                modifications.contains(&ContinuousModification::AddSubtype {
+                    subtype: singular.into()
+                }),
+                "{plural} must canonicalize to {singular}; got {modifications:?}"
+            );
+        }
     }
 
     /// CR 205.3 + CR 613.1c: Case-insensitive fallback — trigger-effect text

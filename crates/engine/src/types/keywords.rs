@@ -2653,6 +2653,20 @@ impl FromStr for Keyword {
             }
         }
 
+        // CR 702.63b: Vanishing printed with NO number is still the keyword — the
+        // upkeep-removal and last-counter-sacrifice abilities, without the
+        // enters-with-N-counters one. MTGJSON reports it as the BARE name
+        // ("Vanishing", no colon), so the parameterized block below — which needs a
+        // parameter — never runs for it and the name fell through to `Unknown`.
+        // The card-data pipeline filters `Unknown` out, so both copies were lost:
+        // the base list dropped it here, and the keyword-line router (which skips
+        // emitting for a name MTGJSON already carries) emitted nothing because it
+        // assumes that base copy exists. Out of Time and Tidewalker came out with
+        // no keyword at all and an uncovered Vanishing line.
+        if param.is_none() && name_lower == "vanishing" {
+            return Ok(Keyword::Vanishing(0));
+        }
+
         // If there's a param, try parameterized keywords first
         if let Some(ref p) = param {
             match name_lower.as_str() {
@@ -4006,6 +4020,35 @@ pub fn has_keyword(obj: &crate::game::game_object::GameObject, keyword: &Keyword
 mod tests {
     use super::*;
     use crate::types::ability::Effect;
+
+    /// CR 702.63b: `FromStr` must read the NUMBERLESS printed form, because that is
+    /// the form MTGJSON hands the pipeline (`keywords: ["Vanishing"]`, no colon) —
+    /// and the card-data builder filters `Unknown` out, so returning `Unknown` here
+    /// silently deletes the keyword from the card. Out of Time and Tidewalker are
+    /// both printed that way; before this arm they had no keyword and their
+    /// Vanishing line counted as a silent drop.
+    #[test]
+    fn numberless_vanishing_parses_from_the_bare_mtgjson_name() {
+        for spelling in ["Vanishing", "vanishing"] {
+            assert_eq!(
+                Keyword::from_str(spelling).unwrap(),
+                Keyword::Vanishing(0),
+                "{spelling} must read as the CR 702.63b numberless keyword"
+            );
+        }
+        // The numbered form keeps its count, in the colon spelling the pipeline
+        // feeds FromStr. The SPACE-separated spelling is `parse_keyword_line_core`'s
+        // job — it normalizes "vanishing 3" to the colon form before calling here —
+        // so FromStr is right to decline it rather than guess.
+        assert_eq!(
+            Keyword::from_str("Vanishing:12").unwrap(),
+            Keyword::Vanishing(12)
+        );
+        assert_eq!(
+            Keyword::from_str("vanishing 3").unwrap(),
+            Keyword::Unknown("vanishing 3".to_string())
+        );
+    }
 
     // SHAPE: CR 702.5a + CR 205.3m: the single-leg adapter must retain the
     // creature head, canonical Wall exclusion and controller suffix together.

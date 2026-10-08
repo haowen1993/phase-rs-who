@@ -579,6 +579,14 @@ fn parse_mtgjson_missing_standalone_keyword_line(
         // CR 702.22: "Bands with other [quality]" carries the quality in Oracle
         // text; MTGJSON's keyword list has no typed payload to preserve it.
         Keyword::BandsWithOther(_) => Some(vec![keyword]),
+        // CR 702.63b: numberless Vanishing. Reached here, not through the
+        // metadata path, because a card whose `keywords` metadata is empty hands
+        // this function the line with no MTGJSON name to match — Out of Time and
+        // Tidewalker are both printed "Vanishing" with no number, and both were
+        // dropping the line. Gated on the ZERO count so a line that did carry a
+        // number (and simply lacked metadata) is not silently accepted with its
+        // count erased.
+        Keyword::Vanishing(0) => Some(vec![keyword]),
         _ => None,
     }
 }

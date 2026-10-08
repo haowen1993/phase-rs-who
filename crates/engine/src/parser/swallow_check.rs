@@ -626,6 +626,43 @@ fn countered_spell_zone_redirect_is_only_instead_marker(
     parse_countered_spell_redirect_shape(sentence).is_ok() && instead_sentences.next().is_none()
 }
 
+/// CR 614.1a + CR 611.2a + CR 607.1: true when the typed leave-battlefield rider of a
+/// graveyard-cast permission accounts for the unit's " instead".
+///
+/// The rider and the stack-to-graveyard redirect are SIBLINGS on
+/// `StaticMode::GraveyardCastPermission`. "If a spell cast this way would be put into your
+/// graveyard, exile it instead" replaces a STACK exit; the rider — "If you do, it gains
+/// 'If this permanent would leave the battlefield, exile it instead of putting it
+/// anywhere else.'" (the eighth doctor) — replaces a BATTLEFIELD exit. An arm covering
+/// only the first sibling leaves the second's " instead" looking unclaimed, which is how
+/// the card was reported as swallowing the very sentence its own permission carries.
+///
+/// `leave_battlefield_replacement` is a `bool`, so like the countered-spell redirect slot
+/// it carries no sentence-level provenance: it records that the rider was consumed, never
+/// that it was the unit's ONLY " instead". A unit holding the rider AND a second,
+/// unmodelled " instead" must therefore keep warning about the second — the same reason
+/// `countered_spell_zone_redirect_is_only_instead_marker` above is written this way.
+fn leave_battlefield_rider_is_only_instead_marker(cleaned: &str, parsed: &ParsedAbilities) -> bool {
+    let carries_rider = parsed.statics.iter().any(|static_def| {
+        matches!(
+            static_def.mode,
+            StaticMode::GraveyardCastPermission {
+                leave_battlefield_replacement: true,
+                ..
+            }
+        )
+    });
+    if !carries_rider {
+        return false;
+    }
+    let mut instead_sentences = split_sentence_units(cleaned)
+        .into_iter()
+        .filter(|sentence| scan_contains(sentence, "instead"));
+    // With the count proven to be one, the " instead" the parser consumed in this unit is
+    // the only one there is, so nothing else can be riding on the field's authority.
+    instead_sentences.next().is_some() && instead_sentences.next().is_none()
+}
+
 // ── Detector A: Replacement_Instead ─────────────────────────────────────
 
 /// CR 614: "if X would Y, [do Z] instead" — every "instead" phrase outside of
@@ -672,6 +709,15 @@ fn detect_replacement_instead(
     // CR 608.2m + CR 614.1a + CR 614.11: the remaining replacement carriers live
     // in an effect or a static rather than in `parsed.replacements`.
     if any_ability_has_replacement_carrier(parsed) {
+        return;
+    }
+    // CR 614.1a + CR 611.2a + CR 607.1: "If you do, it gains 'If this permanent would
+    // leave the battlefield, exile it instead of putting it anywhere else.'" — the
+    // BATTLEFIELD-exit sibling of the stack-exit rider handled by
+    // `static_is_replacement_carrier`. Gated on the property AND on the marker being the
+    // unit's only one, not on the mode: the population of the field is one card, and a
+    // bare-mode exemption would silence every other graveyard-cast permission's warnings.
+    if leave_battlefield_rider_is_only_instead_marker(cleaned, parsed) {
         return;
     }
     // CR 701.6a + CR 614.1a + CR 608.2c: "If that spell is countered this way, put it
@@ -6107,7 +6153,8 @@ mod tests {
     use super::{
         any_ability_has_unimplemented, def_tree_has_optional, def_tree_has_unimplemented,
         detect_replacement, dynamic_markers_are_all_recorded_unrecognized,
-        effect_has_internal_optionality, trigger_tree_has_optional, twice_is_activation_limit,
+        effect_has_internal_optionality, leave_battlefield_rider_is_only_instead_marker,
+        trigger_tree_has_optional, twice_is_activation_limit,
     };
     use crate::parser::oracle::parse_oracle_text;
     use crate::parser::oracle_effect::gap_diagnosis::{
@@ -6543,6 +6590,87 @@ If you sang a song the whole time you were searching and shuffling, you may unta
             !has_swallowed_detector(&parsed, "Replacement_Instead"),
             "{:?}",
             parsed.parse_warnings
+        );
+    }
+
+    /// CR 614.1a + CR 611.2a + CR 607.1: The Eighth Doctor's graveyard-cast permission
+    /// carries its "instead" in the leave-battlefield GRANT RIDER — the BATTLEFIELD-exit
+    /// sibling of Kess's stack-exit redirect, in a different field of the SAME static
+    /// mode. Discharging only one sibling left the other's " instead" looking unclaimed,
+    /// which reported the card as swallowing the very sentence its permission carries.
+    #[test]
+    fn replacement_instead_is_represented_by_the_graveyard_cast_leave_battlefield_rider() {
+        let parsed = parse_named(
+            "When The Eighth Doctor enters, mill three cards.\nOnce during each of your \
+             turns, you may play a historic land or cast a historic permanent spell from \
+             your graveyard. If you do, it gains \"If this permanent would leave the \
+             battlefield, exile it instead of putting it anywhere else.\"",
+            "The Eighth Doctor",
+            &["Creature"],
+        );
+        // Reach guard, in two parts: the permission parsed (so the unit was not skipped at
+        // its Unimplemented guard) AND the rider is actually recorded. Without both, the
+        // assertion below would be satisfied by a field that is never set anywhere.
+        assert!(
+            !any_ability_has_unimplemented(&parsed),
+            "{:?}",
+            parsed.statics
+        );
+        assert!(
+            parsed.statics.iter().any(|static_def| matches!(
+                static_def.mode,
+                StaticMode::GraveyardCastPermission {
+                    leave_battlefield_replacement: true,
+                    ..
+                }
+            )),
+            "{:?}",
+            parsed.statics
+        );
+        assert!(
+            !has_swallowed_detector(&parsed, "Replacement_Instead"),
+            "{:?}",
+            parsed.parse_warnings
+        );
+    }
+
+    /// The exemption above is gated on the RIDER and on its being the unit's ONLY
+    /// " instead" — not on the mode, and not on the field alone.
+    ///
+    /// COMPOSED FIXTURE, stated rather than implied: the second text is two verbatim
+    /// printed sentences (The Eighth Doctor's permission line + Abandoned Sarcophagus's
+    /// redirect) placed in one unit. The pool has no card that carries the rider AND a
+    /// second " instead", so no corpus witness can reach this boundary — a whole-pool scan
+    /// returns exactly one carrier of the field, and it has exactly one " instead" — but
+    /// the field's authority must not extend past the sentence it records.
+    #[test]
+    fn leave_battlefield_rider_discharges_only_its_own_instead_marker() {
+        let parsed = parse_named(
+            "When The Eighth Doctor enters, mill three cards.\nOnce during each of your \
+             turns, you may play a historic land or cast a historic permanent spell from \
+             your graveyard. If you do, it gains \"If this permanent would leave the \
+             battlefield, exile it instead of putting it anywhere else.\"",
+            "The Eighth Doctor",
+            &["Creature"],
+        );
+        let permission = "Once during each of your turns, you may play a historic land or \
+                          cast a historic permanent spell from your graveyard. If you do, it \
+                          gains \"If this permanent would leave the battlefield, exile it \
+                          instead of putting it anywhere else.\""
+            .to_ascii_lowercase();
+        assert!(
+            leave_battlefield_rider_is_only_instead_marker(&permission, &parsed),
+            "the rider's own sentence is the unit's only \" instead\""
+        );
+
+        let with_a_second = format!(
+            "{permission} If a card that has a cycling ability would be put into your \
+             graveyard from anywhere and it wasn't cycled, exile it instead."
+        )
+        .to_ascii_lowercase();
+        assert!(
+            !leave_battlefield_rider_is_only_instead_marker(&with_a_second, &parsed),
+            "a second \" instead\" in the same unit must keep warning, not ride on the rider"
         );
     }
 

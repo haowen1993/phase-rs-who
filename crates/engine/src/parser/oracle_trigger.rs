@@ -12543,11 +12543,44 @@ fn parse_trigger_subject<'a>(text: &'a str, ctx: &mut ParseContext) -> (TargetFi
     ))
     .parse(rest_trimmed)
     {
+        // CR 702.95b: a second leg naming the PAIRED PARTNER ("~ or a creature
+        // it's paired with" — Donna Noble; the printed soulbond trigger) is not an
+        // `Or` of two independent filters: the partner is reachable only through
+        // the pairing, and `Or { SelfRef, <creature> }` would fire on damage to any
+        // creature. The engine carries exactly this relation as its own selector,
+        // `TargetFilter::SourceOrPaired` ("the source or the creature it's paired
+        // with"), so the disjunction collapses into it.
+        //
+        // Gated on the first leg being the SOURCE: `SourceOrPaired` names the
+        // source's partner, so collapsing a disjunction over two other subjects
+        // would silently retarget the trigger onto the source.
+        if first == TargetFilter::SelfRef {
+            if let Some(final_rest) = parse_paired_partner_leg(after_sep) {
+                return (TargetFilter::SourceOrPaired, final_rest);
+            }
+        }
         let (second, final_rest) = parse_trigger_subject(after_sep, ctx);
         return (merge_or_filters(first, second), final_rest);
     }
 
     (first, rest)
+}
+
+/// CR 702.95b: "a/the creature it's paired with" — the soulbond partner of the
+/// trigger's source, as a subject leg. Accepts the spelled-out copula and the
+/// typographic apostrophe the corpus uses interchangeably.
+fn parse_paired_partner_leg(input: &str) -> Option<&str> {
+    alt((
+        tag::<_, _, OracleError<'_>>("a creature it's paired with"),
+        tag("the creature it's paired with"),
+        tag("a creature it\u{2019}s paired with"),
+        tag("the creature it\u{2019}s paired with"),
+        tag("a creature it is paired with"),
+        tag("the creature it is paired with"),
+    ))
+    .parse(input)
+    .ok()
+    .map(|(rest, _)| rest)
 }
 
 /// Which downstream parser handles a recognized player-subject event verb.

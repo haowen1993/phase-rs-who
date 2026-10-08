@@ -29341,20 +29341,20 @@ fn cross_subject_state_change_or_not_split() {
         "Donna Noble",
     );
     assert_eq!(triggers.len(), 1);
-    // Positive reach-guard. `len() == 1` alone is weak: a line that never reached the
-    // cross-subject gate at all would also yield one trigger. Donna Noble is honestly
-    // `Unknown` today, and the payload is the discriminator — it must still carry the
-    // WHOLE cross-subject condition, "is dealt damage" included. Widening that gate
-    // splits the line and truncates the payload to the bare subject, so this assertion
-    // proves the input reached the gate and was declined intact.
-    match &triggers[0].mode {
-        TriggerMode::Unknown(payload) => assert!(
-            payload.contains("or a creature it's paired with is dealt damage"),
-            "the whole cross-subject condition must survive unsplit, got {payload:?}"
-        ),
-        other => panic!("expected the cross-subject line to stay Unknown, got {other:?}"),
-    }
+    // CR 702.95b: the paired-partner leg collapses into `SourceOrPaired`, so the
+    // line is now ONE `DamageReceived` trigger over the source-or-partner selector.
+    //
+    // The guarantee this test has always carried is unchanged — ONE trigger, with
+    // the WHOLE condition consumed, never a split into a subject-only husk plus a
+    // second half. What moved is the expectation: the paired leg had no
+    // representation when this was written, so `Unknown` carrying the intact
+    // payload was the honest verdict; now it has one.
+    assert_eq!(triggers[0].mode, TriggerMode::DamageReceived);
+    assert_eq!(triggers[0].valid_card, Some(TargetFilter::SourceOrPaired));
 
+    // The sibling keeps its existing shape: a subject disjunction over a state
+    // change stays ONE `Taps` trigger with a merged subject (widening the
+    // cross-subject gate is what would split it).
     let triggers = parse_trigger_lines(
         "Whenever this token or a Gamer you control becomes tapped, remove an hour counter from this token.",
         "The Bus Runner",

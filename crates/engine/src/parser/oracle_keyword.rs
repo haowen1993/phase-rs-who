@@ -2011,6 +2011,24 @@ pub(crate) fn parse_keyword_line_core(text: &str) -> Option<(Keyword, &str)> {
         return None;
     }
 
+    // CR 702.63b: "Vanishing" printed WITHOUT a number is a real keyword — the
+    // upkeep-removal and last-counter-sacrifice abilities, without the
+    // enters-with-N-counters one — so a bare "vanishing" line must parse. It has
+    // no space to split a parameter off, and declining there is what dropped the
+    // keyword on Out of Time and Tidewalker (each then counted its Vanishing line
+    // as a silent drop). `FromStr` already reads the empty parameter correctly
+    // ("vanishing:" parses to `Vanishing(0)`), and at 0 the CR 702.63a upkeep
+    // trigger's "if this permanent has a time counter on it" gate is what makes
+    // the behaviour numberless rather than degenerate.
+    //
+    // Deliberately NOT generalised to every bare keyword word: no other
+    // numeric-count keyword has a numberless meaning in the rules, and admitting
+    // them here would make the keyword-list router emit a second copy of keywords
+    // MTGJSON already carries for the card.
+    if text == "vanishing" {
+        return Some((Keyword::Vanishing(0), ""));
+    }
+
     // For parameterized keywords, find the first space to split name from parameter.
     // Oracle format: "protection from multicolored" → name="protection", rest="from multicolored"
     // Oracle format: "ward {2}" → name="ward", rest="{2}"
@@ -3560,12 +3578,17 @@ mod tests {
             parse_granted_keyword_fragment("vanishing 3"),
             Some(Keyword::Vanishing(3))
         );
-        // CR 702.63b: a single-word bare keyword has no space, so the normalizer's
-        // `split_once_on(text, " ")` fails and the line is not recognized here
-        // (bare vanishing reaches the engine via the MTGJSON colon-form path, not
-        // this Oracle-grant normalizer). This is unchanged pre-existing behavior;
-        // the fix must not start spuriously accepting the space-less form.
-        assert_eq!(parse_granted_keyword_fragment("vanishing"), None);
+        // CR 702.63b: a single-word bare "vanishing" has no space to split a
+        // parameter off, and it now has a dedicated arm: numberless Vanishing is a
+        // defined keyword (the upkeep-removal and last-counter-sacrifice abilities
+        // without the enters-with-N one), so it parses to the zero-count shape the
+        // upkeep trigger's "has a time counter" gate renders as numberless. Before
+        // that arm the whole line was declined, which dropped the keyword on Out of
+        // Time and Tidewalker and counted each Vanishing line as a silent drop.
+        assert_eq!(
+            parse_granted_keyword_fragment("vanishing"),
+            Some(Keyword::Vanishing(0))
+        );
         // Fading shares the normalizer with no dedicated arm — proves the class.
         assert_eq!(
             parse_granted_keyword_fragment("fading 2 if it's an artifact"),

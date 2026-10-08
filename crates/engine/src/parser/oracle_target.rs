@@ -7786,9 +7786,22 @@ struct KeywordSuffix {
 fn parse_keyword_suffix(text: &str) -> Option<(KeywordSuffix, usize)> {
     let trimmed = text.trim_start();
     let leading_ws = text.len() - trimmed.len();
-    let (after_with, _) = tag::<_, _, OracleError<'_>>("with ").parse(trimmed).ok()?;
+    // CR 608.2c: the keyword-presence predicate has three printed spellings, and
+    // they differ only in their lead-in — the prepositional "with <kw>" and the
+    // relative clauses "that has <kw>" / "that have <kw>" (the agreement follows
+    // the HEAD NOUN, so a plural head takes "have": "each of those cards that has
+    // suspend" is the printed exception, agreeing with the distributive "each").
+    // One `alt()` over the lead axis, then identical keyword-list handling — never
+    // three copies of the same scanner.
+    let (after_with, lead_len) = alt((
+        value("with ".len(), tag::<_, _, OracleError<'_>>("with ")),
+        value("that has ".len(), tag("that has ")),
+        value("that have ".len(), tag("that have ")),
+    ))
+    .parse(trimmed)
+    .ok()?;
     let mut remaining = after_with;
-    let mut consumed = leading_ws + "with ".len();
+    let mut consumed = leading_ws + lead_len;
     let mut properties = Vec::new();
     let mut disjunctive = false;
 
@@ -8282,6 +8295,14 @@ fn parse_keyword_match(text: &str) -> Option<KeywordMatch> {
     // keywords) is a keyword-presence meta-reference that must match by
     // discriminant, not exact payload — a `WithKeyword(Awaken { count, cost })`
     // would never match a real instance. Route to `KeywordMatch::Kind`.
+    //
+    // CR 702.62a: suspend belongs to this set for the same reason, and the failure
+    // is sharper because the bare word parses: `Keyword::from_str("suspend")`
+    // yields `Suspend { count: 0, cost: empty }`, so "each of those cards that has
+    // suspend" (Ecstatic Beauty) would have matched cards whose suspend is
+    // parameterized to zero — that is, nothing. A printed `Suspend N—{cost}`
+    // written out in full still reaches the concrete arm below, because that
+    // candidate is longer and the `rest.is_empty()` guard rejects the bare match.
     if matches!(
         text,
         "flashback"
@@ -8294,6 +8315,7 @@ fn parse_keyword_match(text: &str) -> Option<KeywordMatch> {
             | "awaken"
             | "foretell"
             | "miracle"
+            | "suspend"
     ) {
         let kind = match text {
             "flashback" => KeywordKind::Flashback,
@@ -8309,6 +8331,7 @@ fn parse_keyword_match(text: &str) -> Option<KeywordMatch> {
             // discriminant so a granted (cost-bearing) instance still matches.
             "foretell" => KeywordKind::Foretell, // allow-noncombinator: normalized keyword-token -> KeywordKind lookup (finite set, gated by matches! above), not Oracle-text dispatch
             "miracle" => KeywordKind::Miracle, // allow-noncombinator: normalized keyword-token -> KeywordKind lookup (finite set, gated by matches! above; mirrors flashback/cycling arms), not Oracle-text dispatch
+            "suspend" => KeywordKind::Suspend, // allow-noncombinator: normalized keyword-token -> KeywordKind lookup (finite set, gated by matches! above; mirrors flashback/cycling arms), not Oracle-text dispatch
             _ => unreachable!(),
         };
         return Some(KeywordMatch::Kind(kind));
@@ -14178,6 +14201,54 @@ mod tests {
             }
         ));
         assert_eq!(rest, "");
+    }
+
+    /// CR 608.2c + CR 702.62a: the keyword-presence predicate has three printed
+    /// lead-ins and they differ only in that axis — "with <kw>", "that has <kw>",
+    /// "that have <kw>". Only "with" was recognised, so "each of those cards that
+    /// has suspend" could not fold into the tracked set and Ecstatic Beauty's
+    /// third instruction strict-failed to `Unimplemented`. The relative-clause
+    /// spellings must produce the SAME property as the prepositional one.
+    #[test]
+    fn that_has_keyword_relative_clause_matches_the_with_spelling() {
+        for (text, expected) in [
+            // A parameterized keyword must match by DISCRIMINANT: the bare word
+            // parses as `Suspend { count: 0, cost: empty }`, and a value match on
+            // that payload would match nothing at all.
+            (
+                "each of those cards that has suspend",
+                FilterProp::HasKeywordKind {
+                    value: KeywordKind::Suspend,
+                },
+            ),
+            (
+                "each of those cards that have suspend",
+                FilterProp::HasKeywordKind {
+                    value: KeywordKind::Suspend,
+                },
+            ),
+            // A plain keyword has no payload to get wrong, so the value form is
+            // the right one and stays.
+            (
+                "each of those creatures that has flying",
+                FilterProp::WithKeyword {
+                    value: Keyword::Flying,
+                },
+            ),
+        ] {
+            let (filter, rest) = parse_target(text);
+            assert_eq!(rest, "", "{text} must be consumed whole");
+            let TargetFilter::TrackedSetFiltered { filter, .. } = filter else {
+                panic!("{text} must intersect the tracked set, got {filter:?}");
+            };
+            let TargetFilter::Typed(typed) = &*filter else {
+                panic!("{text} must keep a typed inner filter, got {filter:?}");
+            };
+            assert!(
+                typed.properties.contains(&expected),
+                "{text} must carry {expected:?}, got {typed:?}"
+            );
+        }
     }
 
     /// CR 601.2c: "each of <count> target <type>" must route through "target"

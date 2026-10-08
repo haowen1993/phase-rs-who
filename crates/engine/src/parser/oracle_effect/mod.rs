@@ -1207,6 +1207,24 @@ fn rebind_keyword_anaphor_to_resolution_pick_tracked_set(
     else {
         return false;
     };
+    install_tracked_set_selector_on_grant(clause, selector)
+}
+
+/// Point a "…gain <kw>" grant clause at `selector`: every `StaticDefinition` the
+/// clause carries takes it as their `affected` set, and the clause's own `target`
+/// takes it too. The two move together — the resolver broadcasts a `GenericEffect`
+/// over its `target` while layer 6 reads each definition's `affected`, so a clause
+/// carrying one without the other grants to a different set than it tests.
+///
+/// Shared by the two clauses that express a per-member keyword test over a tracked
+/// set: the SINGULAR anaphor ("if it doesn't have suspend, it gains suspend" — the
+/// resolution pick is the set) and the PLURAL restrictive form ("cards exiled this
+/// way that don't have suspend gain suspend"). Both fold the test into the set
+/// selector rather than attaching a separate condition that could misbind.
+fn install_tracked_set_selector_on_grant(
+    clause: &mut ParsedEffectClause,
+    selector: TargetFilter,
+) -> bool {
     let Effect::GenericEffect {
         static_abilities,
         duration,

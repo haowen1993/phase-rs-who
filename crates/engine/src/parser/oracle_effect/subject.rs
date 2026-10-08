@@ -5161,28 +5161,21 @@ fn build_continuous_clause(
 /// matched today — no "affected this way" arm). The produced clause is
 /// byte-for-byte the Jhoira/Tenth suspend-grant shape.
 ///
-/// The optional "that don't have <kw>" restrictive clause (CR 702.62a) is
-/// recognised by the parser but results in a strict-failure (`None`), because it
-/// is a PER-MEMBER predicate over a whole tracked set and no existing condition
-/// variant expresses that. The SINGULAR anaphor ("if it doesn't have <kw>") is
-/// covered — it lowers to `AbilityCondition::TargetMatchesFilter` with
-/// `FilterProp::WithoutKeywordKind`, re-anchored to
-/// `CostPaidObjectMatchesFilter` by clause context (see
-/// `rewrite_keyword_anaphor_for_cost_paid_parent`) — but both of those test ONE
-/// subject: the ability's first object target, or the single cost-paid snapshot.
-/// `AbilityCondition::ZoneChangedThisWay` covers the set, yet only as an
-/// EXISTENTIAL ("some card exiled this way matches"), which answers a different
-/// question than "exclude each member that already has the keyword".
+/// The optional "that don't have <kw>" restrictive clause (CR 702.62a) is a
+/// per-member predicate over the whole tracked set, and it lowers by folding the
+/// keyword test INTO the set selector —
+/// `TrackedSetFiltered { filter: <no <kw>>, caused_by: Exiled }` — the same shape
+/// the singular anaphor ("if it doesn't have suspend, it gains suspend") uses,
+/// for the same reason: the test and the grant then read one set, so no separate
+/// condition is left to bind to the wrong subject. It used to strict-fail; the
+/// selector variant it needed did not exist then, and the alternatives
+/// (`TargetMatchesFilter` tests ONE subject, `ZoneChangedThisWay` is a set
+/// EXISTENTIAL) would each have overgranted. See
+/// `keyword_anaphor_resolution_pick_tracked_set_selector` for the full argument.
 ///
-/// Attaching any of the three therefore produces an unconditional overgrant for
-/// the plural form — already-<kw> cards would still receive a redundant grant,
-/// clobbering their printed parameters. Until a per-member predicate over a
-/// tracked set exists, "cards exiled this way that don't have <kw> gain <kw>"
-/// stays a documented strict-failure deferred to `Unimplemented`.
-///
-/// Returns `None` (strict-failure to `Unimplemented`) when the restrictive
-/// clause is present or when the predicate is not a recognised "gain <kw>"
-/// keyword grant.
+/// Returns `None` (strict-failure to `Unimplemented`) when the predicate is not a
+/// recognised "gain <kw>" keyword grant, or when the clause the head introduces is
+/// not the continuous grant this function expects.
 pub(super) fn try_parse_exiled_this_way_keyword_grant(
     text: &str,
     ctx: &ParseContext,
@@ -5202,12 +5195,15 @@ pub(super) fn try_parse_exiled_this_way_keyword_grant(
         .parse(i)
     })?;
 
-    // Detect the restrictive "that don't have <kw>" clause (CR 702.62a).
-    // When present, strict-fail: a PER-MEMBER predicate over the exiled tracked
-    // set is not yet expressible. The singular anaphor's two lowerings each test
-    // one subject and `ZoneChangedThisWay` is a set existential, so attaching any
-    // of them here would silently overgrant — see the fn doc for the full
-    // explanation.
+    // CR 702.62a + CR 608.2c: the restrictive "that don't have <kw>" clause is a
+    // PER-MEMBER test over the exiled tracked set. It folds into the set selector
+    // — `TrackedSetFiltered { filter: <no <kw>>, caused_by: Exiled }` — which is
+    // the shape the SINGULAR anaphor already lowers to (see
+    // `keyword_anaphor_resolution_pick_tracked_set_selector`), so the test and the
+    // grant read one set and there is no separate condition left to misbind. This
+    // used to strict-fail: at the time, no variant expressed a per-member predicate
+    // over a tracked set, and attaching `ZoneChangedThisWay` (a set EXISTENTIAL)
+    // would have overgranted. The selector now exists, so the deferral is retired.
     let after_head_lower = after_head.to_lowercase();
     let has_restrictive = nom_on_lower(after_head, &after_head_lower, |i| {
         let (i, _) = tag(" that do").parse(i)?;
@@ -5216,10 +5212,8 @@ pub(super) fn try_parse_exiled_this_way_keyword_grant(
         let (i, _) = tag(" have ").parse(i)?;
         let (i, _) = take_until(" gain").parse(i)?;
         Ok((i, ()))
-    });
-    if has_restrictive.is_some() {
-        return None;
-    }
+    })
+    .is_some();
 
     // The predicate must be a "gain <kw>" continuous keyword grant; reuse the
     // shared `build_continuous_clause` machinery (which applies the keyword-driven
@@ -5232,7 +5226,31 @@ pub(super) fn try_parse_exiled_this_way_keyword_grant(
         inherits_parent: false,
         is_optional: false,
     };
-    build_continuous_clause(application, after_head.trim(), ctx)
+    let mut clause = build_continuous_clause(application, after_head.trim(), ctx)?;
+
+    if has_restrictive {
+        // The keyword comes off the clause that was just parsed, never re-derived
+        // from the sentence, so the whole "…that don't have <kw> gain <kw>" class is
+        // covered by construction and no printed `Suspend N—{cost}` can be clobbered.
+        let keyword = super::granted_keyword_from_clause(&clause)?;
+        let selector = TargetFilter::TrackedSetFiltered {
+            // Sentinel for "the resolution chain's most recent published set".
+            id: crate::types::identifiers::TrackedSetId(0),
+            filter: Box::new(TargetFilter::Typed(
+                crate::types::ability::TypedFilter::card().properties(vec![
+                    crate::types::ability::FilterProp::WithoutKeywordKind {
+                        value: keyword.kind(),
+                    },
+                ]),
+            )),
+            caused_by: Some(crate::types::ability::ThisWayCause::Exiled),
+        };
+        if !super::install_tracked_set_selector_on_grant(&mut clause, selector) {
+            return None;
+        }
+    }
+
+    Some(clause)
 }
 
 /// Strip "for each [clause]" suffix from text so that duration extraction can find
@@ -8336,29 +8354,63 @@ mod tests {
         )));
     }
 
-    // Strict-failure guard: the "that don't have <kw>" restrictive clause
-    // produces a documented strict-failure (None) because the correct per-card
-    // object-scoped condition is not yet implemented. Both keyword variants must
-    // be rejected so the chunk falls through to Unimplemented.
+    // CR 702.62a + CR 608.2c: the "that don't have <kw>" restrictive clause folds
+    // into the tracked-set SELECTOR — the per-member keyword test rides the set, so
+    // no separate condition is left to bind to the wrong subject. This clause used
+    // to strict-fail while no variant could express a per-member predicate over a
+    // tracked set; the selector now exists, and what still has to hold is that the
+    // grant is NOT unconditional: an unfiltered grant would hand the keyword to
+    // cards that already have it and clobber a printed `Suspend N—{cost}`.
     #[test]
-    fn exiled_this_way_with_restrictive_clause_is_strict_failure() {
+    fn exiled_this_way_with_restrictive_clause_folds_the_test_into_the_selector() {
+        use crate::types::ability::{FilterProp, TypedFilter};
+        use crate::types::identifiers::TrackedSetId;
+        use crate::types::keywords::KeywordKind;
+
         let ctx = ParseContext::default();
-        assert!(
-            try_parse_exiled_this_way_keyword_grant(
+        for (text, kind) in [
+            (
                 "Cards exiled this way that don't have suspend gain suspend",
-                &ctx,
-            )
-            .is_none(),
-            "suspend restrictive clause must strict-fail"
-        );
-        assert!(
-            try_parse_exiled_this_way_keyword_grant(
+                KeywordKind::Suspend,
+            ),
+            (
                 "Cards exiled this way that don't have flying gain flying",
-                &ctx,
-            )
-            .is_none(),
-            "flying restrictive clause must strict-fail"
-        );
+                KeywordKind::Flying,
+            ),
+        ] {
+            let clause = try_parse_exiled_this_way_keyword_grant(text, &ctx)
+                .unwrap_or_else(|| panic!("{text} must parse"));
+            let Effect::GenericEffect {
+                static_abilities,
+                target,
+                ..
+            } = &clause.effect
+            else {
+                panic!("expected GenericEffect, got {:?}", clause.effect);
+            };
+            let expected = TargetFilter::TrackedSetFiltered {
+                id: TrackedSetId(0),
+                filter: Box::new(TargetFilter::Typed(
+                    TypedFilter::card()
+                        .properties(vec![FilterProp::WithoutKeywordKind { value: kind }]),
+                )),
+                caused_by: Some(crate::types::ability::ThisWayCause::Exiled),
+            };
+            assert_eq!(
+                target.as_ref(),
+                Some(&expected),
+                "the grant's own target must be the filtered set, never an unfiltered one"
+            );
+            assert_eq!(
+                static_abilities.first().and_then(|s| s.affected.as_ref()),
+                Some(&expected),
+                "every definition's affected set must be the same filtered set the target names"
+            );
+            assert!(
+                static_abilities.iter().all(|s| s.affected.is_some()),
+                "a definition left on its default affected set would grant unfiltered"
+            );
+        }
     }
 
     // Strict-failure guard: a non-"gain <kw>" predicate after the subject head
@@ -8374,16 +8426,16 @@ mod tests {
         .is_none());
     }
 
-    // CR 608.2c: The Wedding of River Song — full spell chain. Both Defect B
-    // ("then target opponent does the same") and Defect C ("cards exiled this
-    // way that don't have suspend gain suspend") are documented strict-failures
-    // (`Unimplemented`): Defect B pending cross-cutting opponent-choice routing,
-    // Defect C pending an object-scoped condition variant that applies per
-    // exiled card rather than per spell source (see
-    // try_parse_exiled_this_way_keyword_grant). Neither should degenerate into
-    // the prior silent `ChangeZone{empty, Opponent}` misparse.
+    // CR 608.2c: The Wedding of River Song — full spell chain. Defect B ("then
+    // target opponent does the same") is still a documented strict-failure: it
+    // needs cross-cutting opponent-choice routing, which does not exist. Defect C
+    // ("cards exiled this way that don't have suspend gain suspend") is NO LONGER
+    // one: the per-member selector it was waiting for arrived with the resolution
+    // -pick rebinding, so it must now parse — but only onto the FILTERED set. An
+    // unfiltered grant would be the overgrant the old strict-failure was protecting
+    // against, so that is what this asserts.
     #[test]
-    fn wedding_of_river_song_chain_strict_failures_are_documented() {
+    fn wedding_of_river_song_chain_grants_suspend_to_the_filtered_set_only() {
         let def = super::super::parse_effect_chain(
             "Draw two cards, then you may exile a nonland card from your hand with a \
              number of time counters on it equal to its mana value. Then target \
@@ -8427,27 +8479,56 @@ mod tests {
             "the degenerate empty-Opponent exile misparse must be gone"
         );
 
-        // Defect C: "cards exiled this way that don't have suspend gain suspend"
-        // must NOT produce a GenericEffect suspend grant. The "that don't have"
-        // restrictive clause strict-fails until an object-scoped condition exists.
-        fn chain_has_suspend_grant(def: &AbilityDefinition) -> bool {
+        // Defect C: the suspend grant must reach the FILTERED tracked set — the
+        // set the "this way" back-reference names, intersected with the per-member
+        // "doesn't have suspend" test.
+        fn suspend_grant_selector(def: &AbilityDefinition) -> Option<&TargetFilter> {
             use crate::types::keywords::Keyword;
-            let here = matches!(
-                &*def.effect,
-                Effect::GenericEffect { static_abilities, .. }
-                    if static_abilities.iter().any(|s| s.modifications.iter().any(|m| matches!(
-                        m,
-                        ContinuousModification::AddKeyword { keyword: Keyword::Suspend { .. } }
-                    )))
-            );
-            here || def
-                .sub_ability
+            if let Effect::GenericEffect {
+                static_abilities,
+                target,
+                ..
+            } = &*def.effect
+            {
+                if static_abilities.iter().any(|s| {
+                    s.modifications.iter().any(|m| {
+                        matches!(
+                            m,
+                            ContinuousModification::AddKeyword {
+                                keyword: Keyword::Suspend { .. }
+                            }
+                        )
+                    })
+                }) {
+                    return target.as_ref();
+                }
+            }
+            def.sub_ability
                 .as_ref()
-                .is_some_and(|s| chain_has_suspend_grant(s))
+                .and_then(|s| suspend_grant_selector(s))
         }
+        let selector = suspend_grant_selector(&def)
+            .expect("Defect C must now produce the suspend grant it was deferred for");
+        let TargetFilter::TrackedSetFiltered {
+            filter, caused_by, ..
+        } = selector
+        else {
+            panic!("the grant must target the filtered tracked set, got {selector:?}");
+        };
+        assert_eq!(
+            caused_by,
+            &Some(crate::types::ability::ThisWayCause::Exiled),
+            "the back-reference is what the chain exiled, not any tracked set"
+        );
         assert!(
-            !chain_has_suspend_grant(&def),
-            "Defect C must not produce a GenericEffect suspend grant (strict-failure expected)"
+            matches!(
+                &**filter,
+                TargetFilter::Typed(tf) if tf.properties.iter().any(|p| matches!(
+                    p,
+                    crate::types::ability::FilterProp::WithoutKeywordKind { .. }
+                ))
+            ),
+            "the per-member 'doesn't have suspend' test must ride the selector, got {filter:?}"
         );
     }
 

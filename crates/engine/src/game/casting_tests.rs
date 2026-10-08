@@ -10476,19 +10476,24 @@ fn jhoira_reads_a_suspend_granted_in_exile_after_the_cost_was_paid() {
 /// The Wedding of River Song (WHO) — runtime regression for the core chain.
 /// Drives the real cast pipeline (CastSpell → resolution) and asserts:
 /// (a) the controller draws two cards; (b) the controller's nonland card is
-/// exiled with time counters = its mana value (CR 122.1).
+/// exiled with time counters = its mana value (CR 122.1); (c) that exiled card
+/// GAINS suspend.
 ///
-/// The "Cards exiled this way that don't have suspend gain suspend" clause
-/// (Defect C) is a *documented strict-failure* — the "that don't have <kw>"
-/// restrictive clause strict-fails to `Unimplemented` because it needs a
-/// PER-MEMBER predicate over the exiled tracked set. The singular anaphor's two
-/// lowerings (`TargetMatchesFilter` / `CostPaidObjectMatchesFilter`) each test
-/// exactly one subject, and `ZoneChangedThisWay` is a set existential, so none
-/// of them expresses "exclude each member that already has suspend". The exiled
-/// card therefore does NOT gain suspend at runtime — this is expected, not a
-/// regression. See `try_parse_exiled_this_way_keyword_grant` for details.
+/// (c) used to be asserted the other way round: "Cards exiled this way that
+/// don't have suspend gain suspend" was a documented strict-failure, because the
+/// "that don't have <kw>" restrictive clause needs a PER-MEMBER predicate over
+/// the exiled tracked set, and the lowerings available then each tested one
+/// subject (`TargetMatchesFilter`, `CostPaidObjectMatchesFilter`) or the set
+/// existentially (`ZoneChangedThisWay`). That predicate now exists —
+/// `TrackedSetFiltered { filter: <no suspend>, caused_by: Exiled }`, the selector
+/// the resolution-pick rebinding introduced — so the clause parses and the grant
+/// really lands. This assertion is the end-to-end half of that: it fails if the
+/// selector ever stops matching, and it would also fail on the overgrant the old
+/// deferral was protecting against being reintroduced unfiltered (a card that
+/// ALREADY has suspend must keep its printed parameters; that half is pinned by
+/// `keyword_anaphor_subject_binding`'s suspend-parameter test).
 ///
-/// "Then target opponent does the same" is also a documented strict-failure
+/// "Then target opponent does the same" is still a documented strict-failure
 /// (no opponent exile happens) pending cross-cutting engine targeting work.
 #[test]
 fn wedding_of_river_song_exiles_card_and_draws_two() {
@@ -10623,15 +10628,12 @@ fn wedding_of_river_song_exiles_card_and_draws_two() {
     // (b) The controller's nonland card was exiled.
     assert_eq!(state.objects[&p0_card].zone, Zone::Exile);
 
-    // (c) The "that don't have suspend" restrictive clause is a documented
-    // strict-failure: the exiled card must NOT gain suspend (the grant
-    // produces Unimplemented, not GenericEffect{AddKeyword(Suspend)}).
-    // This assertion locks in the strict-failure boundary so we notice if
-    // the overgrant is accidentally reintroduced.
+    // (c) The exiled card does not have suspend, so the restrictive clause grants
+    // it — the per-member selector matched the very card the chain exiled.
     assert!(
-        !object_has_effective_keyword_kind(state, p0_card, KeywordKind::Suspend),
-        "the exiled card must NOT gain suspend: the 'that don't have' clause \
-             is a strict-failure until object-scoped condition support exists"
+        object_has_effective_keyword_kind(state, p0_card, KeywordKind::Suspend),
+        "the exiled card must gain suspend: it is a member of the exiled tracked \
+         set and it did not have the keyword"
     );
 }
 

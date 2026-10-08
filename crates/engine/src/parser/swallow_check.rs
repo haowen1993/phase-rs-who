@@ -3082,6 +3082,27 @@ fn detect_dynamic_qty(
     }) {
         return;
     }
+    //   CR 701.55a + CR 608.2c: "For each of them, that creature's controller faces
+    //              a villainous choice" (Hunted by The Family). The iteration IS the
+    //              chooser: `ChooseOneOf { chooser: ParentObjectTargetController }`
+    //              hands the branch choice to the controller of the parent's OBJECT
+    //              target, so one choice is faced per chosen creature and there is
+    //              no separate quantity to record. Gated on that chooser rather
+    //              than on `ChooseOneOf` alone — a plain `Chooser::Controller`
+    //              choice is one choice for the caster and says nothing about a
+    //              per-target "for each", so suppressing on it would hide real
+    //              drops.
+    if evidence.any_effect(|e| {
+        matches!(
+            e,
+            Effect::ChooseOneOf {
+                chooser: PlayerFilter::ParentObjectTargetController,
+                ..
+            }
+        )
+    }) {
+        return;
+    }
     // CR 106.1: a mana ability whose AMOUNT is read from game state carries its quantity in
     // the `ManaProduction` variant itself — `Effect::Mana.produced` is typed `ManaProduction`,
     // NOT `QuantityRef`, so the key-anchored quantity probes above cannot see it.
@@ -10855,6 +10876,90 @@ this spell's mana cost.\nDestroy target attacking creature without flying.",
         );
 
         assert!(!has_swallowed_detector(&parsed, "DynamicQty"));
+    }
+
+    /// CR 701.55a + CR 608.2c: "For each of them, that creature's controller faces
+    /// a villainous choice" (Hunted by The Family). The marker is a bare
+    /// "for each ", but the iteration IS the chooser — the parent's object target's
+    /// controller picks the branch, one choice per chosen creature — so nothing was
+    /// dropped and the DynamicQty warning inverted the coverage contract.
+    #[test]
+    fn dynamic_qty_accepts_a_per_target_villainous_choice() {
+        let parsed = parse_named(
+            "Choose up to four target creatures you don't control. For each of them, \
+             that creature's controller faces a villainous choice — That creature \
+             becomes a 1/1 white Human creature and loses all abilities, or you \
+             create a token that's a copy of it.",
+            "Hunted by The Family",
+            &["Sorcery"],
+        );
+
+        // Reach guard: the per-target chooser is really there, and it is what the
+        // exemption keys on — without it the assertion below would be satisfied by
+        // the clause never parsing at all.
+        let has_per_target_choice = parsed.abilities.iter().any(|ability| {
+            fn find(def: &AbilityDefinition) -> bool {
+                matches!(
+                    def.effect.as_ref(),
+                    Effect::ChooseOneOf {
+                        chooser: PlayerFilter::ParentObjectTargetController,
+                        ..
+                    }
+                ) || def.sub_ability.as_deref().is_some_and(find)
+            }
+            find(ability)
+        });
+        assert!(
+            has_per_target_choice,
+            "reach guard: the parse must carry the per-target chooser. Abilities: {:?}",
+            parsed.abilities
+        );
+        assert!(
+            !has_swallowed_detector(&parsed, "DynamicQty"),
+            "the 'for each of them' iteration rides the chooser; re-reporting it as a \
+             dropped quantity inverts the contract. Warnings: {:?}",
+            parsed.parse_warnings
+        );
+    }
+
+    /// Control for the exemption above, on a real corpus witness: Invoke the
+    /// Ancients prints the same "For each of them" surface, but its `ChooseOneOf`
+    /// is answered by the CASTER (one chooser, not the parent target's controller),
+    /// and its per-token iteration really is unrepresented. The exemption must not
+    /// reach it — that is the difference between "the chooser carries the
+    /// iteration" and "a choice happens to be nearby".
+    #[test]
+    fn dynamic_qty_still_warns_on_a_caster_choice_beside_a_for_each() {
+        let parsed = parse_named(
+            "Create two 4/5 green Spirit creature tokens. For each of them, put your \
+             choice of a reach counter, a vigilance counter, or a trample counter on it.",
+            "Invoke the Ancients",
+            &["Sorcery"],
+        );
+        let has_caster_choice = parsed.abilities.iter().any(|ability| {
+            fn find(def: &AbilityDefinition) -> bool {
+                matches!(
+                    def.effect.as_ref(),
+                    Effect::ChooseOneOf {
+                        chooser: PlayerFilter::Controller,
+                        ..
+                    }
+                ) || def.sub_ability.as_deref().is_some_and(find)
+            }
+            find(ability)
+        });
+        assert!(
+            has_caster_choice,
+            "reach guard: this control is only a control because the chooser is the \
+             caster. Abilities: {:?}",
+            parsed.abilities
+        );
+        assert!(
+            has_swallowed_detector(&parsed, "DynamicQty"),
+            "a caster-answered choice does not express a per-target 'for each', so \
+             this card's dropped quantity must keep warning. Warnings: {:?}",
+            parsed.parse_warnings
+        );
     }
 
     #[test]

@@ -20656,22 +20656,48 @@ fn parse_counter_type_prefix(prefix: &str) -> Option<CounterTriggerFilter> {
     })
 }
 
-/// CR 122.1: Parse "a [type] counter is removed from [subject]" patterns.
-/// Also handles zone constraints like "while it's exiled" (e.g. suspend cards).
+/// CR 122.1: Parse "[when[ever]] a [type] counter is removed from [subject]" and
+/// its BATCHED spelling "one or more [type] counters are removed from [subject]"
+/// (Chandra, Fire Artisan; Cloudsculpt Armorer; Magma Pummeler; Regenerations
+/// Restored). Also handles zone constraints like "while it's exiled" (e.g. suspend
+/// cards).
+///
+/// The two spellings differ on exactly two axes — the lead ("a " vs "one or more ")
+/// and the verb's number ("counter is" vs "counters are") — so they compose rather
+/// than being enumerated. The batched lead also admits a TYPELESS counter ("one or
+/// more counters are removed from a permanent you control"), which leaves the type
+/// empty instead of making the whole phrase unparseable.
+///
+/// The subject must be consumed ENTIRELY (bar trailing punctuation): a tail this
+/// arm cannot express — Magma Pummeler's "…from this creature **this way**", whose
+/// "this way" narrows the trigger to the removal the same ability just caused —
+/// declines here and stays an honest gap, rather than parsing as an unrestricted
+/// counter-removal trigger that would fire on any removal from that creature.
 fn try_parse_counter_removed(lower: &str) -> Option<(TriggerMode, TriggerDefinition)> {
     // Pattern: "a [type] counter is removed from [subject] [while ...]"
+    //          "one or more [type] counters are removed from [subject]"
     let (after_prefix, _) = opt(alt((
         tag::<_, _, OracleError<'_>>("whenever "),
         tag("when "),
     )))
     .parse(lower)
     .ok()?;
-    let (after_a, ()) = value((), tag::<_, _, OracleError<'_>>("a "))
-        .parse(after_prefix)
-        .ok()?;
+    let (after_lead, batched) = alt((
+        value(true, tag::<_, _, OracleError<'_>>("one or more ")),
+        value(false, tag("a ")),
+    ))
+    .parse(after_prefix)
+    .ok()?;
 
+    // No leading space on the separator: the TYPELESS batched form begins directly
+    // with "counters", and a leading space would make that split miss.
+    let separator = if batched {
+        "counters are removed from "
+    } else {
+        "counter is removed from "
+    };
     let (_, (counter_type, subject_rest)) =
-        nom_primitives::split_once_on(after_a, " counter is removed from ").ok()?;
+        nom_primitives::split_once_on(after_lead, separator).ok()?;
     let counter_type = counter_type.trim();
     let subject_rest = subject_rest.trim();
 
@@ -20692,7 +20718,12 @@ fn try_parse_counter_removed(lower: &str) -> Option<(TriggerMode, TriggerDefinit
     if subject_text == "~" || SELF_REF_PARSE_ONLY_PHRASES.contains(&subject_text) {
         def.valid_card = Some(TargetFilter::SelfRef);
     } else {
-        let (filter, _) = parse_single_subject(subject_text, &mut ParseContext::default());
+        let (filter, remainder) = parse_single_subject(subject_text, &mut ParseContext::default());
+        // The subject is the whole clause bar trailing punctuation; a remainder is a
+        // narrowing this arm cannot express (see the "this way" case in the doc).
+        if !remainder.trim_matches(['.', ',', ' ']).is_empty() {
+            return None;
+        }
         def.valid_card = Some(filter);
     }
 

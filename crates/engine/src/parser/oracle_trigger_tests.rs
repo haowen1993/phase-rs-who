@@ -25328,6 +25328,62 @@ fn trigger_counter_removed_no_zone_constraint() {
     assert_eq!(def.trigger_zones, vec![Zone::Battlefield]);
 }
 
+/// CR 122.1: the BATCHED spelling — "one or more [type] counters ARE removed from
+/// [subject]" — is the same trigger as the singular one. It differs on two axes
+/// (lead and verb number), so the arm composes them; before that it matched only
+/// "a … counter is removed from", and this whole class (Chandra, Fire Artisan;
+/// Cloudsculpt Armorer; Magma Pummeler; Regenerations Restored) fell through
+/// unparsed.
+#[test]
+fn trigger_one_or_more_counters_removed_is_the_same_trigger() {
+    // Typed, self-referential subject (Regenerations Restored).
+    let def = parse_trigger_line(
+        "Whenever one or more time counters are removed from this enchantment, scry 1 and you gain 1 life.",
+        "Regenerations Restored",
+    );
+    assert_eq!(def.mode, TriggerMode::CounterRemoved);
+    assert_eq!(def.valid_card, Some(TargetFilter::SelfRef));
+
+    // TYPELESS counter with a filtered subject (Cloudsculpt Armorer): the counter
+    // TYPE is absent, not the phrase.
+    let def = parse_trigger_line(
+        "Whenever one or more counters are removed from a permanent you control, seek a nonland card.",
+        "Cloudsculpt Armorer",
+    );
+    assert_eq!(def.mode, TriggerMode::CounterRemoved);
+    assert!(
+        matches!(def.valid_card, Some(TargetFilter::Typed(ref typed)) if !typed.type_filters.is_empty()),
+        "the typeless form must keep its subject filter, got {:?}",
+        def.valid_card
+    );
+
+    // Named subject (Chandra, Fire Artisan — the pipeline rewrites her name to ~).
+    let def = parse_trigger_line(
+        "Whenever one or more loyalty counters are removed from ~, ~ deals that much damage to target opponent or planeswalker.",
+        "Chandra, Fire Artisan",
+    );
+    assert_eq!(def.mode, TriggerMode::CounterRemoved);
+    assert_eq!(def.valid_card, Some(TargetFilter::SelfRef));
+}
+
+/// The honest-gap guard for the same arm: Magma Pummeler's "…from this creature
+/// **this way**" narrows the trigger to the removal the same ability just caused.
+/// That narrowing has no representation, so the arm must DECLINE — parsing it as a
+/// plain counter-removal trigger would fire on any removal from that creature,
+/// which is a silently wider card than the printed one.
+#[test]
+fn trigger_counters_removed_with_a_this_way_narrowing_declines() {
+    let def = parse_trigger_line(
+        "When one or more counters are removed from this creature this way, put that many +1/+1 counters on this creature.",
+        "Magma Pummeler",
+    );
+    assert_ne!(
+        def.mode,
+        TriggerMode::CounterRemoved,
+        "a 'this way' narrowing must not parse as an unrestricted counter-removal trigger"
+    );
+}
+
 // -----------------------------------------------------------------------
 // CR 608.2k: Trigger pronoun resolution — "it"/"its" context-dependent
 // -----------------------------------------------------------------------

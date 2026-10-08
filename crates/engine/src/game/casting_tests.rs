@@ -61019,31 +61019,26 @@ fn quantity_vs_each_opponent_skips_a_player_who_left_the_game() {
 }
 
 /// CR 614.1a + CR 611.2a + CR 607.1: The Eighth Doctor's granted rider must
-/// reach the permanent cast through the permission.
+/// reach the permanent cast through the permission — and must not eat its entry.
 ///
-/// NOT YET DRIVEN — the cause is measured, and it is NOT the rider.
+/// WHAT THIS TEST CAUGHT: it was parked `#[ignore]`d because the cast always
+/// RESOLVED TO EXILE instead of the battlefield, and eleven rounds of scaffolding
+/// (hand-built creature, hand-built artifact, constructions matching
+/// `graveyard_cast_this_way_enters_with_finality_counter` field for field) failed
+/// to change that. The cause was neither the scaffolding nor the permission kind:
+/// a leave-battlefield rider encodes the origin it substitutes for ("from the
+/// battlefield") in its substitute `ChangeZone { origin: Some(Battlefield), .. }`,
+/// and the `Moved` matcher accepted ANY zone change of its host. The permission
+/// installs the rider at the `finalize_cast` seam, while the object is still a
+/// SPELL on the stack, so the rider was live for the spell's own stack →
+/// battlefield move and exiled the permanent instead of letting it enter.
+/// `moved_replacement_origin_matches` now scopes such a replacement to moves out
+/// of the origin it declares.
 ///
-/// Eleven rounds of test scaffolding have failed to make this cast resolve. The
-/// cast itself works (the card reaches the Stack, elected through the
-/// `CastingVariantChoice` menu), but the spell always RESOLVES TO EXILE instead
-/// of the battlefield, so the seam assertion is unreachable. That was true for
-/// every card construction tried: hand-built creature, hand-built artifact, and
-/// constructions matching `graveyard_cast_this_way_enters_with_finality_counter`
-/// field for field.
-///
-/// The one structural difference from that WORKING test is the permission kind:
-/// it drives a `CastFromZone` grant (`CastingPermission::ExileWithAltCost`),
-/// while this drives a static `StaticMode::GraveyardCastPermission`. So the next
-/// attempt should either
-///   (a) drive this rider through the `CastFromZone` path instead, or
-///   (b) find why the static-permission path sends the resolved permanent to
-///       Exile — which may be a real engine bug rather than a test artifact,
-///       since a graveyard-cast permanent should not be exiled on resolution.
-///
-/// The discriminating assertion is the installed replacement: reverting the
-/// rider leaves only the permission and the assertion flips.
+/// The two assertions below are the pair that pins it, and neither alone is
+/// enough: the permanent must ENTER (the rider must not hijack the entry) AND it
+/// must host the installed rider (the grant must not be dropped).
 #[test]
-#[ignore = "the test cast resolves to Exile, not the battlefield; see the doc comment"]
 fn eighth_doctor_graveyard_cast_installs_the_leave_battlefield_exile_rider() {
     let mut state = setup_game_at_main_phase();
 

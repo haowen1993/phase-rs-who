@@ -7099,6 +7099,54 @@ fn evaluate_replacement_condition(
 /// non-damage events. `source` is the replacement's source object (the sentinel
 /// `ObjectId(0)` for a global install); `source_controller` anchors
 /// controller-relative filters/conditions. Returns `true` when all gates pass.
+/// CR 614.1a + CR 614.6: the zone a `Moved` replacement's substitute move starts in,
+/// when its payload declares one.
+///
+/// "If this permanent would leave the battlefield, exile it instead of putting it
+/// anywhere else" encodes the replaced event's ORIGIN in the substitute move —
+/// `ChangeZone { origin: Some(Zone::Battlefield), destination: Zone::Exile, .. }` —
+/// because the `Moved` event carries no origin field of its own and `moved_matcher`
+/// accepts ANY zone change of its host. Every other leave-battlefield rider in the
+/// pool declares that same origin (126 instances across the export); riders that
+/// mean "from anywhere" (Rest in Peace and friends) declare `origin: None` and stay
+/// unscoped.
+fn moved_replacement_origin_zone(repl_def: &ReplacementDefinition) -> Option<Zone> {
+    if repl_def.event != ReplacementEvent::Moved {
+        return None;
+    }
+    match &*repl_def.execute.as_ref()?.effect {
+        Effect::ChangeZone {
+            origin: Some(zone), ..
+        } => Some(*zone),
+        _ => None,
+    }
+}
+
+/// CR 614.1a + CR 614.6: does the proposed move start in the zone this `Moved`
+/// replacement substitutes for? An undeclared origin ("from anywhere") always matches.
+///
+/// This is what keeps a leave-battlefield rider off its host's own ENTRY. The rider
+/// is live from the moment it is granted, and for a GRANTED rider that moment can
+/// precede the battlefield entry: The Eighth Doctor's permission installs it at the
+/// `finalize_cast` seam while the object is still a spell on the stack, so an
+/// ungated rider redirected the resolving permanent's stack → battlefield move to
+/// Exile — the permanent never entered.
+fn moved_replacement_origin_matches(
+    repl_def: &ReplacementDefinition,
+    event: &ProposedEvent,
+) -> bool {
+    let Some(origin) = moved_replacement_origin_zone(repl_def) else {
+        return true;
+    };
+    match event {
+        ProposedEvent::ZoneChange { from, .. } => *from == origin,
+        // CR 614.1a: a token entering is not a move OFF any zone, so an
+        // origin-scoped `Moved` replacement has nothing to substitute for it.
+        ProposedEvent::TokenEntry { .. } => false,
+        _ => true,
+    }
+}
+
 fn apply_state_level_gates(
     repl_def: &ReplacementDefinition,
     event: &ProposedEvent,
@@ -7138,6 +7186,12 @@ fn apply_state_level_gates(
         if !matches_dest {
             return false;
         }
+    }
+    // CR 614.1a + CR 614.6: a Moved replacement whose payload declares the zone it
+    // moves the object FROM applies only to moves from that zone — see
+    // `moved_replacement_origin_matches` for what this keeps off a host's entry.
+    if !moved_replacement_origin_matches(repl_def, event) {
+        return false;
     }
     // CR 614.1d: Evaluate the replacement condition (e.g. EnteredFromZone).
     if let Some(ref cond) = repl_def.condition {
@@ -7586,6 +7640,9 @@ fn object_replacement_candidate_applies(
         if !matches_dest {
             return false;
         }
+    }
+    if !moved_replacement_origin_matches(repl_def, event) {
+        return false;
     }
     if let Some(ref cond) = repl_def.condition {
         if !evaluate_replacement_condition(
@@ -13123,6 +13180,75 @@ mod tests {
                 },
             ))
             .valid_card(TargetFilter::SelfRef)
+    }
+
+    /// CR 614.1a + CR 614.6: a `Moved` replacement whose payload declares the zone it
+    /// moves the object FROM substitutes only for moves OUT of that zone, while an
+    /// undeclared origin ("from anywhere") stays universal.
+    ///
+    /// This gate is what keeps a leave-battlefield rider off its host's own ENTRY.
+    /// The rider is live from the moment it is granted, and a GRANTED rider can be
+    /// granted before the battlefield entry: The Eighth Doctor's graveyard permission
+    /// installs it at the `finalize_cast` seam, while the object is still a SPELL on
+    /// the stack. Ungated, the rider matched the spell's own stack → battlefield move
+    /// and sent the resolving permanent to Exile — measured, the permanent never
+    /// entered (see `eighth_doctor_graveyard_cast_installs_the_leave_battlefield_exile_rider`).
+    #[test]
+    fn moved_replacement_declared_origin_scopes_the_move_it_substitutes_for() {
+        // The single-authority rider, exactly as production builds it.
+        let rider = crate::parser::oracle_effect::leave_battlefield_exile_replacement();
+        assert_eq!(
+            moved_replacement_origin_zone(&rider),
+            Some(Zone::Battlefield),
+            "the rider's substitute move declares the battlefield as its origin"
+        );
+
+        let moves = |from: Zone, to: Zone| ProposedEvent::zone_change(ObjectId(10), from, to, None);
+        // Every way off the battlefield is substituted for — the rider says "leave the
+        // battlefield", not "be destroyed" (CR 614.1a: dies, exile, bounce alike).
+        for to in [Zone::Graveyard, Zone::Exile, Zone::Hand, Zone::Library] {
+            assert!(
+                moved_replacement_origin_matches(&rider, &moves(Zone::Battlefield, to)),
+                "a battlefield → {to:?} move is what the rider substitutes for"
+            );
+        }
+        // The entry itself, and every other move the host can make, is not.
+        for (from, to) in [
+            (Zone::Stack, Zone::Battlefield),
+            (Zone::Graveyard, Zone::Battlefield),
+            (Zone::Hand, Zone::Graveyard),
+            (Zone::Library, Zone::Graveyard),
+        ] {
+            assert!(
+                !moved_replacement_origin_matches(&rider, &moves(from, to)),
+                "{from:?} → {to:?} is not a battlefield exit and must not be redirected"
+            );
+        }
+        // CR 614.1a: a token entering is not a move OFF any zone, so an origin-scoped
+        // replacement has nothing to substitute for it.
+        let entering_token = ProposedEvent::TokenEntry {
+            entry_ref: ObjectId(10),
+            enter_tapped: crate::types::zones::EtbTapState::Unspecified,
+            enter_with_counters: Vec::new(),
+            applied: Default::default(),
+        };
+        assert!(!moved_replacement_origin_matches(&rider, &entering_token));
+
+        // Control: a redirect that declares NO origin ("from anywhere", the shape Rest
+        // in Peace and the graveyard-destination riders use) stays universal — the gate
+        // must not narrow it.
+        let from_anywhere = redirect_self_moved_replacement(Zone::Exile);
+        assert_eq!(moved_replacement_origin_zone(&from_anywhere), None);
+        for (from, to) in [
+            (Zone::Stack, Zone::Battlefield),
+            (Zone::Hand, Zone::Graveyard),
+            (Zone::Battlefield, Zone::Graveyard),
+        ] {
+            assert!(
+                moved_replacement_origin_matches(&from_anywhere, &moves(from, to)),
+                "an undeclared origin must keep matching {from:?} → {to:?}"
+            );
+        }
     }
 
     #[test]

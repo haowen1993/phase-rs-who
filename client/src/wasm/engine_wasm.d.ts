@@ -9,6 +9,11 @@
 export function apply_seat_mutation(state_json: string, mutation_json: string): any;
 
 /**
+ * The longest match structure `format` may be played as; the lobby offers Bo3 only when this is Bo3.
+ */
+export function bestOfThreeCeilingForFormat(format: any): any;
+
+/**
  * Build the HTTP request for one LLM-driven AI decision.
  *
  * `endpoint_json` is the player's configured `LlmEndpointConfig`. `history_json`
@@ -709,6 +714,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly apply_seat_mutation: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly bestOfThreeCeilingForFormat: (a: any) => any;
     readonly buildLlmDecisionRequest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly buildLlmProbeRequest: (a: number, b: number) => [number, number, number];
     readonly build_ai_card_subset: () => [number, number, number, number];

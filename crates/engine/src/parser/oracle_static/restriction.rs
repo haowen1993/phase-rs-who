@@ -3745,6 +3745,7 @@ pub(crate) fn try_parse_top_of_library_cast_permission(
             // shipping Bolas's Citadel form has no prefix → Unlimited).
             frequency,
             alt_cost,
+            when_you_do: None,
         })
         .affected(TargetFilter::Any)
         .description(text.to_string());
@@ -3793,6 +3794,7 @@ pub(crate) fn try_parse_top_of_library_cast_permission(
             play_mode,
             frequency,
             alt_cost,
+            when_you_do: None,
         })
         .affected(TargetFilter::Any)
         .description(text.to_string());
@@ -3833,6 +3835,7 @@ pub(crate) fn try_parse_top_of_library_cast_permission(
         play_mode,
         frequency,
         alt_cost,
+        when_you_do: None,
     })
     .affected(filter)
     .description(text.to_string());
@@ -4132,10 +4135,18 @@ fn try_parse_disjunctive_top_of_library_cast_permission(
 
     let alt_cost = parse_top_of_library_alt_cost_rider(trailing, text);
 
+    // CR 603.2 + CR 601.2a: "… from the top of your library. When you do, <effect>."
+    // — the triggered rider (The Fourth Doctor). Split it off the tail BEFORE the
+    // alt-cost and condition riders read it, so a second sentence can never be
+    // mistaken for part of theirs; the body parses through the same
+    // `parse_effect_chain` entry the granted-ability machinery uses.
+    let (trailing, when_you_do) = split_when_you_do_rider(trailing);
+
     let mut def = StaticDefinition::new(StaticMode::TopOfLibraryCastPermission {
         play_mode: CardPlayMode::Play,
         frequency,
         alt_cost,
+        when_you_do,
     })
     .affected(affected)
     .description(text.to_string());
@@ -4143,6 +4154,42 @@ fn try_parse_disjunctive_top_of_library_cast_permission(
         def = def.condition(condition);
     }
     Some(def)
+}
+
+/// CR 603.2: split a trailing triggered rider — "when you do, <effect>" — off an
+/// effect tail, returning `(remaining tail, parsed rider)`.
+///
+/// The grant is static, so this is an ordinary triggered ability whose trigger
+/// event is the permitted action (CR 603.2), put on the stack when it triggers
+/// (CR 603.3) — not a CR 603.12 reflexive ability, which a *resolving* spell or
+/// ability creates.
+///
+/// Split with the shared `split_once_on` primitive rather than a bare `find`, and
+/// take the head from the ORIGINAL-case slice so the caller's own combinators keep
+/// seeing the spelling they expect.
+///
+/// A rider with an empty body leaves the tail untouched and yields `None`: the line
+/// then stays an honest gap rather than gaining a permission that silently drops
+/// the printed consequence.
+fn split_when_you_do_rider(
+    trailing: &str,
+) -> (&str, Option<Box<crate::types::ability::AbilityDefinition>>) {
+    const OPENER: &str = "when you do, ";
+    let lower = trailing.to_lowercase();
+    let Ok((_, (head_lower, body_lower))) = nom_primitives::split_once_on(&lower, OPENER) else {
+        return (trailing, None);
+    };
+    let head = &trailing[..head_lower.len()];
+    let body = &trailing[trailing.len() - body_lower.len()..];
+    // Reminder text is not rules text — "(Artifacts, legendaries, and Sagas are
+    // historic.)" rides the same sentence on the printed card.
+    let body = strip_reminder_text(body);
+    let body = body.trim().trim_end_matches('.').trim();
+    if body.is_empty() {
+        return (trailing, None);
+    }
+    let rider = parse_effect_chain(body, AbilityKind::Spell);
+    (head, Some(Box::new(rider)))
 }
 
 /// CR 601.2b + CR 118.9a: Parse Omniscience-class restricted free-cast static

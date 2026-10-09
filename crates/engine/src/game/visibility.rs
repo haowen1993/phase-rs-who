@@ -10317,6 +10317,7 @@ mod tests {
             play_mode: CardPlayMode::Cast,
             frequency: CastFrequency::Unlimited,
             alt_cost: None,
+            when_you_do: None,
         });
         def.affected = Some(TargetFilter::Any);
         def

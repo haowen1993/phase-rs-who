@@ -42703,6 +42703,7 @@ mod top_of_library_cast_permission_runtime {
             play_mode: CardPlayMode::Cast,
             frequency: CastFrequency::Unlimited,
             alt_cost: None,
+            when_you_do: None,
         })
         .affected(TargetFilter::Typed(TypedFilter {
             type_filters: vec![
@@ -42869,6 +42870,7 @@ mod top_of_library_cast_permission_runtime {
             play_mode: CardPlayMode::Cast,
             frequency: CastFrequency::OncePerTurn,
             alt_cost: None,
+            when_you_do: None,
         })
         .affected(TargetFilter::Typed(TypedFilter {
             type_filters: vec![TypeFilter::Creature],
@@ -42882,6 +42884,69 @@ mod top_of_library_cast_permission_runtime {
             .static_definitions
             .push(def);
         src
+    }
+
+    /// CR 603.2 + CR 603.3: The Fourth Doctor's permission prints a triggered rider
+    /// — "… from the top of your library. **When you do**, create a Food token."
+    /// Taking the permitted action IS the trigger event, so the rider must be put on
+    /// the stack ABOVE the spell it authorized (the spell is already there when
+    /// finalization retags it, CR 601.2i), which is why the printed consequence
+    /// resolves first.
+    ///
+    /// Discriminating: reverting the delivery leaves exactly ONE stack entry (the
+    /// spell) — the assertion on the top entry's source is what proves the rider was
+    /// read back from the AUTHORIZING permission rather than fabricated.
+    #[test]
+    fn top_of_library_permission_delivers_its_when_you_do_rider() {
+        let mut scenario = GameScenario::new();
+        scenario.at_phase(Phase::PreCombatMain);
+        let doctor = {
+            let mut source = scenario.add_creature(P0, "The Fourth Doctor", 0, 4);
+            let source_id = source.id();
+            source.from_oracle_text(
+                "Once each turn, you may play a historic land or cast a historic spell \
+                 from the top of your library. When you do, create a Food token.",
+            );
+            source_id
+        };
+        let mut runner = scenario.build();
+        let state = runner.state_mut();
+
+        // CR 700.6: an artifact is a historic card, so the permission covers it.
+        let spell = put_card_on_top_of_library(
+            state,
+            P0,
+            CardId(911),
+            "Top Relic",
+            vec![CoreType::Artifact],
+        );
+        let mut events = Vec::new();
+        handle_cast_spell(state, P0, spell, CardId(911), &mut events)
+            .expect("the top-of-library permission authorizes this cast");
+
+        assert_eq!(
+            state.stack.len(),
+            2,
+            "the spell plus the rider it triggered: {:?}",
+            state
+                .stack
+                .iter()
+                .map(|entry| entry.source_id)
+                .collect::<Vec<_>>()
+        );
+        let rider = state.stack.last().expect("rider on top");
+        assert_eq!(
+            rider.source_id, doctor,
+            "the rider belongs to the permission's source"
+        );
+        let StackEntryKind::TriggeredAbility { ability, .. } = &rider.kind else {
+            panic!("expected a triggered ability, got {:?}", rider.kind);
+        };
+        assert!(
+            matches!(&ability.effect, Effect::Token { .. }),
+            "the rider must carry the printed 'create a Food token', got {:?}",
+            ability.effect
+        );
     }
 
     /// CR 601.2a + CR 401.5: A `OncePerTurn` top-of-library permission

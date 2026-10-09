@@ -6918,46 +6918,79 @@ fn parse_normalized_oracle_ir(
             continue;
         }
 
-        // CR 207.2c + CR 401.5 + CR 601.1a + CR 603.12: an (optionally
+        // CR 207.2c + CR 401.5 + CR 601.1a + CR 603.2: an (optionally
         // ability-word-prefixed) top-of-library play/cast permission carrying a
-        // reflexive "When you do, <effect>" rider (The Fourth Doctor). Emits
-        // the permission static so play-from-library works, and marks the rider
-        // as an honest unsupported gap (TriggerMode::Unknown) — the reflexive
-        // trigger cannot be correctly scoped until the casting/land-play
-        // pipeline records which permission authorized each play (CR 603.12
-        // provenance limitation: a global PlayCard trigger cannot distinguish
-        // WHICH permission authorized a given play). Must precede Priority 7
+        // triggered "When you do, <effect>" rider (The Fourth Doctor).
+        //
+        // The rider is representable now that the permission CARRIES it
+        // (`StaticMode::TopOfLibraryCastPermission::when_you_do`) and the cast and
+        // land-play pipelines read it back from the permission that actually
+        // authorized the play (`casting::deliver_top_of_library_when_you_do`) — the
+        // provenance this branch previously reported as unavailable. So the line is
+        // parsed WHOLE and claimed.
+        //
+        // Fail closed: if the permission parses but the rider does not lower to an
+        // ability, the line keeps the honest `Unknown("when you do")` gap rather
+        // than silently dropping the printed consequence. Must precede Priority 7
         // (the static-only path would silently drop the rider, hiding the gap).
         {
             let permission_line = strip_ability_word(&line).unwrap_or_else(|| line.clone());
             let permission_lower = permission_line.to_lowercase();
-            if let Some((perm_text, _)) =
-                split_once_on_lower(&permission_line, &permission_lower, ". when you do, ")
+            if split_once_on_lower(&permission_line, &permission_lower, ". when you do, ").is_some()
             {
-                let perm_lower = perm_text.to_lowercase();
                 if let Some(static_def) =
-                    try_parse_top_of_library_cast_permission(perm_text, &perm_lower)
+                    try_parse_top_of_library_cast_permission(&permission_line, &permission_lower)
                 {
-                    // CR 603.12 (deferred): emit TriggerMode::Unknown so the
-                    // rider gap is visible in coverage instead of approximating
-                    // incorrect provenance with a rules-incorrect PlayCard
-                    // trigger. No context mutation: we do not parse the rider
-                    // body here (avoids ctx.subject/actor leakage into
-                    // subsequent lines).
-                    let rider_gap =
-                        TriggerDefinition::new(TriggerMode::Unknown("when you do".to_string()))
-                            .description(line.to_string());
-                    emitter.static_ir_at(
-                        item_line,
-                        StaticIr::from_definition(&line, static_def.description(line.to_string())),
-                    );
-                    // Same `&line` the sibling static above passes: both halves
-                    // of this sentence were recognized from the whole printed
-                    // line, before the `". when you do, "` split.
-                    emitter
-                        .trigger_ir_at(item_line, TriggerNodeIr::from_definition(&line, rider_gap));
-                    i += 1;
-                    continue;
+                    if matches!(
+                        &static_def.mode,
+                        crate::types::statics::StaticMode::TopOfLibraryCastPermission {
+                            when_you_do: Some(_),
+                            ..
+                        }
+                    ) {
+                        emitter.static_ir_at(
+                            item_line,
+                            StaticIr::from_definition(
+                                &line,
+                                static_def.description(line.to_string()),
+                            ),
+                        );
+                        i += 1;
+                        continue;
+                    }
+                }
+                // The rider printed but did not lower: emit the permission static
+                // and mark the rider as an honest unsupported gap. `perm_text` is
+                // passed WITHOUT the rider so the static cannot claim it.
+                if let Some((perm_text, _)) =
+                    split_once_on_lower(&permission_line, &permission_lower, ". when you do, ")
+                {
+                    let perm_lower = perm_text.to_lowercase();
+                    if let Some(static_def) =
+                        try_parse_top_of_library_cast_permission(perm_text, &perm_lower)
+                    {
+                        // No context mutation: we do not parse the rider body here
+                        // (avoids ctx.subject/actor leakage into subsequent lines).
+                        let rider_gap =
+                            TriggerDefinition::new(TriggerMode::Unknown("when you do".to_string()))
+                                .description(line.to_string());
+                        emitter.static_ir_at(
+                            item_line,
+                            StaticIr::from_definition(
+                                &line,
+                                static_def.description(line.to_string()),
+                            ),
+                        );
+                        // Same `&line` the sibling static above passes: both halves
+                        // of this sentence were recognized from the whole printed
+                        // line, before the `". when you do, "` split.
+                        emitter.trigger_ir_at(
+                            item_line,
+                            TriggerNodeIr::from_definition(&line, rider_gap),
+                        );
+                        i += 1;
+                        continue;
+                    }
                 }
             }
         }

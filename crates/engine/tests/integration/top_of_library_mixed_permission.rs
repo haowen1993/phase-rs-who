@@ -72,6 +72,7 @@ fn install_top_of_library_creature_static(
         play_mode: CardPlayMode::Cast,
         frequency,
         alt_cost: None,
+        when_you_do: None,
     })
     .affected(TargetFilter::Typed(TypedFilter {
         type_filters: vec![TypeFilter::Creature],

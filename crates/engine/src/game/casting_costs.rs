@@ -12697,6 +12697,20 @@ fn finalize_cast_with_phyrexian_choices_inner(
         )
         .expect("top-of-library cast permission must have an unused ledger slot");
     }
+    // CR 603.2 + CR 603.3: The authorizing permission may print a triggered rider —
+    // "… from the top of your library. When you do, create a Food token." (The Fourth
+    // Doctor). Taking the permitted action is the trigger event, and the cast it
+    // authorized is already on the stack (CR 601.2i retags the announcement entry),
+    // so the trigger is pushed on top of it here — before any player receives
+    // priority, which is why the printed consequence resolves first.
+    if let Some((permission_source, _)) = top_of_library_permission_source {
+        super::casting::deliver_top_of_library_when_you_do(
+            state,
+            permission_source,
+            player,
+            events,
+        );
+    }
     // CR 601.2a + CR 611.2a: A single-use exile-cast grant is spent
     // on this cast. Record the group and strip the now-void `PlayFromExile` grant from
     // every other card still in the tracked set so the remaining exiled cards

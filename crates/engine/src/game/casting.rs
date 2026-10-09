@@ -6536,6 +6536,7 @@ pub(crate) fn top_of_library_permission_source(
                     play_mode,
                     frequency,
                     alt_cost,
+                    ..
                 } => {
                     // Gate by play_mode: Cast permissions cover only spells;
                     // Play permissions cover both lands and non-land spells
@@ -6769,6 +6770,81 @@ pub(crate) fn top_of_library_selected_permission(
             (top_id == object_id).then_some((src_id, frequency))
         },
     )
+}
+
+/// CR 603.2 + CR 603.3: Deliver the triggered rider of the top-of-library cast
+/// permission whose permitted action was just taken — "… from the top of your
+/// library. **When you do**, create a Food token." (The Fourth Doctor).
+///
+/// CR 603.2: taking the permitted action IS the trigger event, so the ability
+/// triggers; CR 603.3 has its controller put it on the stack as the topmost object.
+/// The cast it responded to is already there (the announcement entry is retagged,
+/// CR 601.2i), so pushing here — before any player receives priority — is what makes
+/// the printed consequence resolve BEFORE the spell.
+///
+/// The rider is read back from the AUTHORIZING static rather than threaded down the
+/// cast pipeline: the permission is the single authority for whether the trigger
+/// exists at all, so a cast authorized by a different permanent must fire THAT
+/// permanent's rider (or none).
+pub(crate) fn deliver_top_of_library_when_you_do(
+    state: &mut GameState,
+    permission_source: ObjectId,
+    player: PlayerId,
+    events: &mut Vec<GameEvent>,
+) {
+    let Some(rider) = state.objects.get(&permission_source).and_then(|obj| {
+        crate::game::functioning_abilities::active_static_definitions(state, obj).find_map(|def| {
+            match &def.mode {
+                StaticMode::TopOfLibraryCastPermission {
+                    when_you_do: Some(rider),
+                    ..
+                } => Some(rider.clone()),
+                _ => None,
+            }
+        })
+    }) else {
+        return;
+    };
+
+    let ability = crate::game::ability_utils::build_resolved_from_def_with_targets(
+        &rider,
+        permission_source,
+        player,
+        Vec::new(),
+    );
+    let description = rider
+        .description
+        .clone()
+        .unwrap_or_else(|| "When you do".to_string());
+    let source_name = state
+        .objects
+        .get(&permission_source)
+        .map(|obj| obj.name.clone())
+        .unwrap_or_default();
+    let entry_id = ObjectId(state.next_object_id);
+    state.next_object_id += 1;
+    let entry = StackEntry {
+        id: entry_id,
+        source_id: permission_source,
+        controller: player,
+        kind: StackEntryKind::TriggeredAbility {
+            source_id: permission_source,
+            ability: Box::new(ability),
+            condition: None,
+            trigger_event: None,
+            description: Some(description),
+            source_name,
+            subject_match_count: None,
+            die_result: None,
+            provenance: None,
+        },
+    };
+    crate::game::stack::push_triggered_to_stack(
+        state,
+        entry,
+        crate::types::identifiers::TriggerFiring::Ordinary,
+        events,
+    );
 }
 
 /// CR 604.2 + CR 305.1 + CR 701.17d: Find lands in the player's graveyard that
@@ -31748,6 +31824,7 @@ mod castable_zone_authority_tests {
             play_mode: CardPlayMode::Cast,
             frequency: CastFrequency::Unlimited,
             alt_cost: None,
+            when_you_do: None,
         });
         def.affected = Some(crate::types::ability::TargetFilter::Any);
         def

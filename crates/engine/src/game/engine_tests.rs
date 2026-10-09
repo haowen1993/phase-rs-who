@@ -11139,6 +11139,7 @@ fn once_per_turn_library_land_play_consumes_slot_and_blocks_second_play() {
             play_mode: crate::types::ability::CardPlayMode::Play,
             frequency: CastFrequency::OncePerTurn,
             alt_cost: None,
+            when_you_do: None,
         })
         .affected(TargetFilter::Any);
         let obj = state.objects.get_mut(&perm_src).unwrap();

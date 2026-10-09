@@ -29662,6 +29662,7 @@ fn top_of_library_cast_permission_realmwalker() {
             play_mode,
             frequency,
             ref alt_cost,
+            ..
         } => {
             assert_eq!(play_mode, CardPlayMode::Cast);
             assert_eq!(frequency, CastFrequency::Unlimited);
@@ -29700,6 +29701,7 @@ fn top_of_library_cast_permission_future_sight_compound() {
             play_mode,
             frequency,
             ref alt_cost,
+            ..
         } => {
             assert_eq!(play_mode, CardPlayMode::Play);
             assert_eq!(frequency, CastFrequency::Unlimited);
@@ -29708,6 +29710,62 @@ fn top_of_library_cast_permission_future_sight_compound() {
         other => panic!("expected TopOfLibraryCastPermission, got {other:?}"),
     }
     assert!(matches!(def.affected, Some(TargetFilter::Any)));
+}
+
+/// CR 603.2 + CR 601.2a: a static permission that prints a triggered rider —
+/// "… from the top of your library. **When you do**, create a Food token." (The
+/// Fourth Doctor) — must carry the parsed rider ON the permission.
+///
+/// Storing it is what lets the cast/play seam deliver the printed consequence.
+/// Without a slot for it the clause had nowhere to live, so the whole line stayed
+/// an unmodelled trigger and the card sat unsupported. The pool has exactly one
+/// card of this shape (the 350 cards whose "when you do" follows an INSTRUCTION
+/// carry `AbilityCondition::WhenYouDo` on a clause instead, because their
+/// antecedent is a resolving instruction), which is why this is a permission field
+/// rather than a new trigger mode with no producers.
+#[test]
+fn top_of_library_cast_permission_carries_a_when_you_do_rider() {
+    let text = "Once each turn, you may play a historic land or cast a historic spell \
+                from the top of your library. When you do, create a Food token.";
+    let lower = text.to_lowercase();
+    let def = try_parse_top_of_library_cast_permission(text, &lower)
+        .expect("The Fourth Doctor static must parse");
+    let StaticMode::TopOfLibraryCastPermission {
+        frequency,
+        ref when_you_do,
+        ..
+    } = def.mode
+    else {
+        panic!("expected TopOfLibraryCastPermission, got {:?}", def.mode);
+    };
+    assert_eq!(
+        frequency,
+        CastFrequency::OncePerTurn,
+        "the 'once each turn' prefix rides the permission"
+    );
+    let rider = when_you_do
+        .as_ref()
+        .expect("the 'When you do' rider must be recorded on the permission");
+    assert!(
+        matches!(&*rider.effect, crate::types::ability::Effect::Token { .. }),
+        "the rider body must parse as its own ability, got {:?}",
+        rider.effect
+    );
+
+    // Control: the printed reminder text must not become part of the rider, and a
+    // permission that prints no rider must record none (the field is not fabricated
+    // from an unrelated trailing sentence).
+    let text = "You may cast creature spells of the chosen type from the top of your library.";
+    let lower = text.to_lowercase();
+    let def = try_parse_top_of_library_cast_permission(text, &lower).expect("Realmwalker parses");
+    match def.mode {
+        StaticMode::TopOfLibraryCastPermission {
+            ref when_you_do, ..
+        } => {
+            assert!(when_you_do.is_none(), "no rider is printed here")
+        }
+        other => panic!("expected TopOfLibraryCastPermission, got {other:?}"),
+    }
 }
 
 /// CR 601.3 + CR 601.1a: The direct-object surface form — "you may [play|cast]
@@ -29727,6 +29785,7 @@ fn top_of_library_object_form_unconditional() {
             play_mode,
             frequency,
             ref alt_cost,
+            ..
         } => {
             assert_eq!(play_mode, CardPlayMode::Play);
             assert_eq!(frequency, CastFrequency::Unlimited);
@@ -29990,6 +30049,7 @@ fn top_of_library_cast_permission_crystal_skull_historic_disjunctive() {
             play_mode,
             frequency,
             ref alt_cost,
+            ..
         } => {
             assert_eq!(play_mode, CardPlayMode::Play);
             assert_eq!(frequency, CastFrequency::Unlimited);
@@ -30039,6 +30099,7 @@ fn top_of_library_cast_permission_locked_hothouse_mixed_disjunctive() {
             play_mode,
             frequency,
             ref alt_cost,
+            ..
         } => {
             assert_eq!(play_mode, CardPlayMode::Play);
             assert_eq!(frequency, CastFrequency::Unlimited);
@@ -30130,6 +30191,7 @@ fn top_of_library_cast_permission_bolas_alt_cost() {
             play_mode,
             frequency: CastFrequency::Unlimited,
             alt_cost: Some(crate::types::ability::AbilityCost::PayLife { amount }),
+            ..
         } => {
             assert_eq!(play_mode, CardPlayMode::Play);
             assert_eq!(
@@ -30211,6 +30273,7 @@ fn top_of_library_cast_permission_once_per_turn_disjunctive() {
             play_mode,
             frequency,
             ref alt_cost,
+            ..
         } => {
             assert_eq!(play_mode, CardPlayMode::Play);
             assert_eq!(frequency, CastFrequency::OncePerTurn);
@@ -30236,7 +30299,6 @@ fn top_of_library_cast_permission_once_per_turn_disjunctive() {
 #[test]
 fn the_fourth_doctor_full_card_parse() {
     use crate::parser::oracle::parse_oracle_text;
-    use crate::types::triggers::TriggerMode;
 
     let text = "You may look at the top card of your library any time.\n\
                 Would You Like A...? — Once each turn, you may play a historic land or cast a \
@@ -30281,6 +30343,7 @@ fn the_fourth_doctor_full_card_parse() {
             play_mode,
             frequency,
             alt_cost,
+            ..
         } => {
             assert_eq!(*play_mode, CardPlayMode::Play);
             assert_eq!(*frequency, CastFrequency::OncePerTurn);
@@ -30294,21 +30357,26 @@ fn the_fourth_doctor_full_card_parse() {
         .expect("permission affected set");
     assert_historic_land_or_card_disjunction(&affected);
 
-    // The reflexive "When you do" rider is an honest TriggerMode::Unknown gap —
-    // the rider cannot be correctly scoped until the engine records permission
-    // provenance (CR 603.12). Coverage will show this gap; a follow-up can
-    // promote it to a real trigger once the provenance seam exists.
-    assert_eq!(
-        parsed.triggers.len(),
-        1,
-        "expected exactly one trigger (Unknown gap marker for rider), got {:?}",
-        parsed.triggers
-    );
-    let trigger = &parsed.triggers[0];
+    // CR 603.2: the "When you do, create a Food token." rider is REPRESENTED, not a
+    // gap: it travels ON the permission as `when_you_do`, and the cast and land-play
+    // pipelines read it back from the permission that actually authorized the play
+    // (`casting::deliver_top_of_library_when_you_do`) — the provenance this card
+    // previously had to defer. So no `Unknown` trigger is emitted for it.
+    match &permission.mode {
+        StaticMode::TopOfLibraryCastPermission {
+            when_you_do: Some(rider),
+            ..
+        } => assert!(
+            matches!(&*rider.effect, Effect::Token { .. }),
+            "the rider must carry the printed Food token, got {:?}",
+            rider.effect
+        ),
+        other => panic!("expected the permission to carry its rider, got {other:?}"),
+    }
     assert!(
-        matches!(trigger.mode, TriggerMode::Unknown(_)),
-        "expected TriggerMode::Unknown (deferred rider gap), got {:?}",
-        trigger.mode
+        parsed.triggers.is_empty(),
+        "the rider is carried by the permission, not modeled as a trigger definition; got {:?}",
+        parsed.triggers
     );
 }
 
@@ -32572,6 +32640,7 @@ fn assemble_the_players_once_per_turn_top_of_library() {
             play_mode,
             frequency,
             alt_cost,
+            ..
         } => {
             assert_eq!(*play_mode, CardPlayMode::Cast);
             assert_eq!(*frequency, CastFrequency::OncePerTurn);
@@ -32664,11 +32733,13 @@ fn top_of_library_frequency_display_roundtrip() {
         play_mode: CardPlayMode::Cast,
         frequency: CastFrequency::Unlimited,
         alt_cost: None,
+        when_you_do: None,
     };
     let once = StaticMode::TopOfLibraryCastPermission {
         play_mode: CardPlayMode::Cast,
         frequency: CastFrequency::OncePerTurn,
         alt_cost: None,
+        when_you_do: None,
     };
     // Unlimited keeps the historical compact form (no freq= segment).
     assert_eq!(unlimited.to_string(), "TopOfLibraryCastPermission(Cast)");

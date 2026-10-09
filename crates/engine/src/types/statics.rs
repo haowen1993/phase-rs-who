@@ -1660,6 +1660,25 @@ pub enum StaticMode {
         /// zeros the spell's mana cost and routes this cost through
         /// `pay_additional_cost` (mirrors the `ExileWithAltAbilityCost` flow).
         alt_cost: Option<AbilityCost>,
+        /// CR 603.2 + CR 603.3 + CR 601.2a: the triggered rider a permission prints
+        /// as "… from the top of your library. **When you do**, <effect>." (The
+        /// Fourth Doctor — the only card in the pool pairing a static permission
+        /// with a "when you do" sentence; the 350 cards whose "when you do" follows
+        /// an INSTRUCTION carry `AbilityCondition::WhenYouDo` on a clause instead,
+        /// because their antecedent is a resolving instruction, not a static grant).
+        ///
+        /// CR 603.2: taking the permitted action is the trigger event, so the
+        /// ability triggers and — CR 603.3 — its controller puts it on the stack as
+        /// the topmost object, which is why the printed consequence resolves BEFORE
+        /// the spell the permission cast. (CR 603.12 covers reflexive abilities
+        /// created by a *resolving* spell or ability; this antecedent is a static
+        /// grant, so the ordinary trigger rules apply.)
+        ///
+        /// The parsed ABILITY travels with the permission: unlike the fixed printed
+        /// riders elsewhere (one known sentence, so a bool suffices), this body is
+        /// arbitrary card text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when_you_do: Option<Box<super::ability::AbilityDefinition>>,
     },
     /// CR 702.170a + CR 702.170f: GRANT half of plot-from-library — "The top
     /// card of your library has plot." The top card of the controller's library
@@ -3452,6 +3471,7 @@ impl fmt::Display for StaticMode {
                 play_mode,
                 frequency,
                 alt_cost,
+                ..
             } => {
                 // CR 601.2a: `frequency` is appended as a tagged segment only
                 // when non-default (`OncePerTurn`) so the historical
@@ -3994,6 +4014,9 @@ impl FromStr for StaticMode {
                 play_mode: CardPlayMode::Cast,
                 frequency: CastFrequency::Unlimited,
                 alt_cost: None,
+                // CR 603.12: the reflexive rider is a parsed ability, preserved
+                // through serde like `alt_cost` — never through this Display cycle.
+                when_you_do: None,
             },
             s if s.starts_with("TopOfLibraryCastPermission(") => {
                 // Display form: "TopOfLibraryCastPermission(<play_mode>
@@ -4021,6 +4044,7 @@ impl FromStr for StaticMode {
                     // CR 118.9: the alt_cost payload is preserved through serde,
                     // not the FromStr round-trip, so FromStr defaults to None.
                     alt_cost: None,
+                    when_you_do: None,
                 }
             }
             // CR 702.170a grant + CR 702.170f permission markers; both nullary —

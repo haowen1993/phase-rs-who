@@ -17423,6 +17423,20 @@ fn handle_play_land(
         events,
     );
 
+    // CR 603.2 + CR 603.3: the land half of a "play … from the top of your library"
+    // permission carries the same triggered rider the cast half does (The Fourth
+    // Doctor's "When you do, create a Food token"). A land play is a special action
+    // that uses no stack (CR 305.1 + CR 116.2a), so once the play has completed the
+    // trigger is simply put on the stack before priority is handed back.
+    if let Some((permission_source, _)) = library_permission_src {
+        super::casting::deliver_top_of_library_when_you_do(
+            state,
+            permission_source,
+            player,
+            events,
+        );
+    }
+
     // Player retains priority after playing a land
     Ok(WaitingFor::Priority { player })
 }

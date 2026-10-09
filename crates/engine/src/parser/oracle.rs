@@ -4400,6 +4400,7 @@ pub(crate) fn lower_oracle_ir(ir: &mut OracleDocIr) -> ParsedAbilities {
     super::swallow_check::check_swallowed_clauses(
         &audit_items,
         &ir.source_text,
+        &ir.card_name,
         &result,
         &tracks,
         &mut swallow_diagnostics,

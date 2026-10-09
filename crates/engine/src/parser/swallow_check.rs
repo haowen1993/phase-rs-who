@@ -161,6 +161,7 @@ fn stamp_provenance(unit_diagnostics: &mut [OracleDiagnostic], unit: &AuditUnit<
 pub(crate) fn check_swallowed_clauses(
     items: &[OracleItemIr],
     source_text: &str,
+    card_name: &str,
     result: &ParsedAbilities,
     tracks: &ItemIdTracks<'_>,
     diagnostics: &mut Vec<OracleDiagnostic>,
@@ -200,7 +201,15 @@ pub(crate) fn check_swallowed_clauses(
             continue;
         }
 
-        let lower_owned = fragment.to_ascii_lowercase();
+        // The card's OWN NAME is not rules text, and a name that happens to contain a
+        // detector's marker word raises a marker the card never printed: "Exile Twice
+        // Upon a Time" matched the `" twice "` dynamic-quantity marker, which reported
+        // a WHO card as having dropped a quantity it never had. Normalize the name to
+        // `~` for the SCAN side only — exactly the spelling the parser gives the AST —
+        // so the text the detectors read and the tree they compare against agree on
+        // self-references. `fragment` still feeds the human-readable messages.
+        let named = super::oracle_util::normalize_card_name_refs(fragment, card_name);
+        let lower_owned = named.to_ascii_lowercase();
         let cleaned = strip_parens(&lower_owned);
 
         // Typed evidence probe over this item's definitions: the tree the detectors
@@ -6496,10 +6505,16 @@ If you sang a song the whole time you were searching and shuffling, you may unta
 
         // Removing the `trailing_guard` arm this phase adds turns this `None`: measured,
         // the scanner has no "as long as" arm at base at all.
+        //
+        // The guard spells the card as `~`: the scan text is name-normalized the same
+        // way the parser normalizes the AST, so a payload and the tree it describes
+        // agree on self-references (and a marker living only inside a card's NAME
+        // cannot be mistaken for rules text — see
+        // `dynamic_qty_ignores_a_marker_that_only_appears_in_the_card_name`).
         assert_eq!(
             warning.gap(),
             Some(&ClauseGap::Condition {
-                guard: "torrent of lava is on the stack".to_string()
+                guard: "~ is on the stack".to_string()
             }),
             "full warning: {warning:?}"
         );
@@ -6544,7 +6559,9 @@ If you sang a song the whole time you were searching and shuffling, you may unta
         assert_eq!(
             only_swallow(&parsed, "Replacement_Instead").gap(),
             Some(&ClauseGap::Replacement {
-                antecedent: "lava burst would deal damage to a creature".to_string()
+                // `~` rather than the spelled-out name: the scan text is
+                // name-normalized exactly as the parser normalizes the AST.
+                antecedent: "~ would deal damage to a creature".to_string()
             }),
             "full warning: {:?}",
             only_swallow(&parsed, "Replacement_Instead")
@@ -10864,6 +10881,45 @@ this spell's mana cost.\nDestroy target attacking creature without flying.",
             !has_swallowed_detector(&parsed, "DynamicQty"),
             "the 'for each' scaling lives inside the clause the parser already reported \
              as unrecognized; re-reporting it double-counts one defect. Warnings: {:?}",
+            parsed.parse_warnings
+        );
+    }
+
+    /// A card's own NAME is not rules text. "Exile Twice Upon a Time." contains the
+    /// `" twice "` dynamic-quantity marker, so the WHO card was reported as having
+    /// dropped a quantity that appears nowhere on it. The scan text is now
+    /// name-normalized to `~` (the parser's own self-reference spelling), which is
+    /// what makes the text side and the AST side agree.
+    #[test]
+    fn dynamic_qty_ignores_a_marker_that_only_appears_in_the_card_name() {
+        let parsed = parse_named(
+            "Cast this spell only if you control two or more Doctors.\nTake an extra \
+             turn after this one. Exile Twice Upon a Time.",
+            "Twice Upon a Time",
+            &["Sorcery"],
+        );
+        assert!(
+            !has_swallowed_detector(&parsed, "DynamicQty"),
+            "the marker exists only inside the card's own name; warnings: {:?}",
+            parsed.parse_warnings
+        );
+    }
+
+    /// Control for the normalization above, on a corpus witness: Erebos's
+    /// Intervention really does scale off a dynamic amount ("Exile up to **twice** X
+    /// target cards"), that amount really is unrepresented, and the warning must
+    /// survive — normalizing names must not become a blanket amnesty for the marker.
+    #[test]
+    fn dynamic_qty_still_fires_on_a_real_twice_marker() {
+        let parsed = parse_named(
+            "Choose one —\n• Target creature gets -X/-X until end of turn. You gain X \
+             life.\n• Exile up to twice X target cards from graveyards.",
+            "Erebos's Intervention",
+            &["Instant"],
+        );
+        assert!(
+            has_swallowed_detector(&parsed, "DynamicQty"),
+            "a real 'twice X' quantity must keep warning; warnings: {:?}",
             parsed.parse_warnings
         );
     }
